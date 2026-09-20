@@ -6,16 +6,27 @@ import type { InterviewConfigRow, InterviewSessionRow, InterviewQuestionResult, 
 
 export async function startInterview(clientUuid: string, interviewId?: string): Promise<InterviewQuestionResult> {
   const supabase = getSupabaseServerClient();
+
+  let resolvedInterviewId = interviewId;
+  if (!resolvedInterviewId) {
+    const { data: defaultInterview, error: defaultError } = await supabase
+      .from("interview")
+      .select("id")
+      .eq("code", "default")
+      .single();
+    if (defaultError || !defaultInterview) {
+      throw new Error(defaultError?.message || "Default interview not found");
+    }
+    resolvedInterviewId = defaultInterview.id;
+  }
+
   const sessionPayload: any = {
     client_uuid: clientUuid,
+    interview_id: resolvedInterviewId,
     current_block: 1,
     status: "in_progress",
     answers: {},
   };
-
-  if (interviewId) {
-    sessionPayload.interview_id = interviewId;
-  }
 
   const { data: session, error: sessionError } = await supabase
     .from("interview_sessions")
@@ -32,7 +43,9 @@ export async function startInterview(clientUuid: string, interviewId?: string): 
 
 export async function submitAnswer(
   clientUuid: string,
-  answer: string
+  answer: string,
+  blockNumber: number,
+  order: number
 ): Promise<InterviewQuestionResult> {
   const supabase = getSupabaseServerClient();
   const { data: session, error: sessionError } = await supabase
@@ -49,19 +62,17 @@ export async function submitAnswer(
   }
 
   const s = session as InterviewSessionRow;
-  const currentBlock = s.current_block;
   const answers = s.answers || {};
 
-  const blockConfig = await getBlockConfig(currentBlock);
+  const blockConfig = await getBlockConfig(blockNumber);
   if (!blockConfig) {
-    throw new Error(`Block ${currentBlock} config not found`);
+    throw new Error(`Block ${blockNumber} config not found`);
   }
 
-  const blockAnswers = answers[currentBlock.toString()] || {};
   const questions = blockConfig.questions.sort((a, b) => a.order - b.order);
-  const isBlockComplete = Object.keys(blockAnswers).length >= questions.length;
+  const isBlockComplete = questions.length > 0 && questions.every((q) => answers[blockNumber.toString()]?.[q.order.toString()]);
 
-  if (currentBlock === 3 && isBlockComplete && !answers.block4_trigger) {
+  if (blockNumber === 3 && isBlockComplete && !answers.block4_trigger) {
     answers.block4_trigger = answer;
     const triggered = isPositiveTrigger(answer);
 
@@ -83,30 +94,25 @@ export async function submitAnswer(
       })
       .eq("id", s.id);
 
-    return getNextQuestion(updatedSession);
+return getNextQuestion(updatedSession, order);
   }
 
-  const answeredOrders = Object.keys(blockAnswers)
-    .map(Number)
-    .filter((n) => !Number.isNaN(n));
-  const nextOrder = answeredOrders.length === 0 ? 1 : Math.max(...answeredOrders) + 1;
-
-  if (!answers[currentBlock.toString()]) {
-    answers[currentBlock.toString()] = {};
+  if (!answers[blockNumber.toString()]) {
+    answers[blockNumber.toString()] = {};
   }
-  answers[currentBlock.toString()][nextOrder.toString()] = answer;
+  answers[blockNumber.toString()][order.toString()] = answer;
 
   const { error: updateError } = await supabase
     .from("interview_sessions")
-    .update({ answers })
+    .update({ answers, current_block: blockNumber })
     .eq("id", s.id);
 
   if (updateError) {
     throw new Error(updateError.message || "Failed to save answer");
   }
 
-  const updatedSession = { ...s, answers };
-  return getNextQuestion(updatedSession);
+  const updatedSession = { ...s, answers, current_block: blockNumber };
+  return getNextQuestion(updatedSession, order);
 }
 
 export async function loadExistingSession(clientUuid: string, interviewId?: string): Promise<InterviewQuestionResult | null> {
@@ -228,11 +234,12 @@ export async function updateAnswer(
   }
 
   const updatedSession = { ...s, answers, current_block: blockNumber };
-  return getNextQuestion(updatedSession);
+  return getNextQuestion(updatedSession, order);
 }
 
 async function getNextQuestion(
-  session: InterviewSessionRow
+  session: InterviewSessionRow,
+  lastAnsweredOrder?: number
 ): Promise<InterviewQuestionResult> {
   const blockConfig = await getBlockConfig(session.current_block);
   if (!blockConfig) {
@@ -242,73 +249,93 @@ async function getNextQuestion(
   const answers = session.answers || {};
   const blockAnswers = answers[session.current_block.toString()] || {};
   const questions = blockConfig.questions.sort((a, b) => a.order - b.order);
-  const nextIndex = Object.keys(blockAnswers).length;
 
-  if (nextIndex >= questions.length) {
-    if (session.current_block === 6) {
-      const supabase = getSupabaseServerClient();
-      await supabase
-        .from("interview_sessions")
-        .update({ status: "completed" })
-        .eq("id", session.id);
-
+  // If lastAnsweredOrder is provided, find the next question in sequence
+  if (lastAnsweredOrder !== undefined) {
+    const currentIndex = questions.findIndex((q) => q.order === lastAnsweredOrder);
+    if (currentIndex >= 0 && currentIndex < questions.length - 1) {
+      const nextQuestion = questions[currentIndex + 1];
       return {
         sessionId: session.id,
         blockNumber: session.current_block,
-        order: 0,
-        text: "Интервью завершено. Далее — синтез профиля.",
-        isLast: true,
-        totalInBlock: questions.length,
-        completed: true,
-      };
-    }
-
-    if (session.current_block === 3 && !answers.block4_trigger) {
-      return {
-        sessionId: session.id,
-        blockNumber: session.current_block,
-        order: 0,
-        text:
-          blockConfig.trigger_question ||
-          "За последние 12 месяцев у тебя было существенное изменение в жизни — переезд, смена семейного статуса, значимая потеря или внезапный рост (в доходе, статусе, обстоятельствах)?",
-        isLast: false,
+        order: nextQuestion.order,
+        text: nextQuestion.text,
+        isLast: nextQuestion.order === questions[questions.length - 1].order,
         totalInBlock: questions.length,
         completed: false,
       };
     }
+    // If last answered was the last question, or not found, fall through to check if block is complete
+  }
 
-    const nextBlock = session.current_block + 1;
+  // Find first unanswered question in current block (for initial load or when order not provided)
+  for (const q of questions) {
+    if (!blockAnswers[q.order.toString()]) {
+      return {
+        sessionId: session.id,
+        blockNumber: session.current_block,
+        order: q.order,
+        text: q.text,
+        isLast: q.order === questions[questions.length - 1].order,
+        totalInBlock: questions.length,
+        completed: false,
+      };
+    }
+  }
+
+  // All questions in current block answered - move to next block
+  if (session.current_block === 6) {
     const supabase = getSupabaseServerClient();
     await supabase
       .from("interview_sessions")
-      .update({ current_block: nextBlock })
+      .update({ status: "completed" })
       .eq("id", session.id);
 
-    const nextBlockConfig = await getBlockConfig(nextBlock);
-    if (!nextBlockConfig) {
-      throw new Error(`Block ${nextBlock} config not found`);
-    }
-
-    const nextQuestions = nextBlockConfig.questions.sort((a, b) => a.order - b.order);
     return {
       sessionId: session.id,
-      blockNumber: nextBlock,
-      order: nextQuestions[0].order,
-      text: nextQuestions[0].text,
-      isLast: nextQuestions.length === 1,
-      totalInBlock: nextQuestions.length,
+      blockNumber: session.current_block,
+      order: 0,
+      text: "Интервью завершено. Далее — синтез профиля.",
+      isLast: true,
+      totalInBlock: questions.length,
+      completed: true,
+    };
+  }
+
+  if (session.current_block === 3 && !answers.block4_trigger) {
+    return {
+      sessionId: session.id,
+      blockNumber: session.current_block,
+      order: 0,
+      text:
+        blockConfig.trigger_question ||
+        "За последние 12 месяцев у тебя было существенное изменение в жизни — переезд, смена семейного статуса, значимая потеря или внезапный рост (в доходе, статусе, обстоятельствах)?",
+      isLast: false,
+      totalInBlock: questions.length,
       completed: false,
     };
   }
 
-  const q = questions[nextIndex];
+  const nextBlock = session.current_block + 1;
+  const supabase = getSupabaseServerClient();
+  await supabase
+    .from("interview_sessions")
+    .update({ current_block: nextBlock })
+    .eq("id", session.id);
+
+  const nextBlockConfig = await getBlockConfig(nextBlock);
+  if (!nextBlockConfig) {
+    throw new Error(`Block ${nextBlock} config not found`);
+  }
+
+  const nextQuestions = nextBlockConfig.questions.sort((a, b) => a.order - b.order);
   return {
     sessionId: session.id,
-    blockNumber: session.current_block,
-    order: q.order,
-    text: q.text,
-    isLast: nextIndex === questions.length - 1,
-    totalInBlock: questions.length,
+    blockNumber: nextBlock,
+    order: nextQuestions[0].order,
+    text: nextQuestions[0].text,
+    isLast: nextQuestions.length === 1,
+    totalInBlock: nextQuestions.length,
     completed: false,
   };
 }

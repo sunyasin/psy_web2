@@ -74,35 +74,49 @@ export default function Home() {
             </div>
 
             <div className="space-y-3">
-              <button
-                onClick={() => (window.location.href = "/last-session")}
-                className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-              >
-                <span className="block text-base font-semibold">Моя последняя сессия</span>
-                <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Продолжить разговор, подвести промежуточные итоги
-                </span>
-              </button>
+              {hasCompleted ? (
+                <>
+                  <button
+                    onClick={() => (window.location.href = "/last-session")}
+                    className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+                  >
+                    <span className="block text-base font-semibold">Моя последняя сессия</span>
+                    <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Продолжить разговор, подвести промежуточные итоги
+                    </span>
+                  </button>
 
-              <button
-                onClick={() => (window.location.href = "/goals")}
-                className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-              >
-                <span className="block text-base font-semibold">Хочу поработать с одной из моих целей</span>
-                <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Посмотреть список целей, добавить новую или обсудить прогресс
-                </span>
-              </button>
+                  <button
+                    onClick={() => (window.location.href = "/goals")}
+                    className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+                  >
+                    <span className="block text-base font-semibold">Хочу поработать с одной из моих целей</span>
+                    <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Посмотреть список целей, добавить новую или обсудить прогресс
+                    </span>
+                  </button>
 
-              <button
-                onClick={() => (window.location.href = "/results")}
-                className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-              >
-                <span className="block text-base font-semibold">Все идеи из моего интервью</span>
-                <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  Мнение ИИ - какое дело/проект могли бы стать моим настоящим призванием 
-                </span>
-              </button>
+                  <button
+                    onClick={() => (window.location.href = "/results")}
+                    className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+                  >
+                    <span className="block text-base font-semibold">Все идеи из моего интервью</span>
+                    <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                      Мнение ИИ - какое дело/проект могли бы стать моим настоящим призванием
+                    </span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => (window.location.href = "/interview")}
+                  className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+                >
+                  <span className="block text-base font-semibold">Пройти интервью</span>
+                  <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                    Начать или продолжить интервью — ИИ найдёт твоё призвание
+                  </span>
+                </button>
+              )}
 
               <button
                 onClick={() => (window.location.href = "/problem")}
