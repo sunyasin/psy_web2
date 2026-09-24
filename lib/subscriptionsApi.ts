@@ -1,5 +1,3 @@
-import { supabase } from "@/lib/supabase";
-
 export interface CreateSubscriptionRequest {
   client_uuid: string;
   subscriptionTierId: string;
@@ -9,6 +7,17 @@ export interface CreateSubscriptionResponse {
   confirmationUrl: string;
   transactionId: string;
   paymentId?: string;
+}
+
+export interface SubscriptionTierRow {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  currency: string;
+  paymentUrl: string | null;
+  tributeSubscriptionId: number | null;
+  tributeTierId: number | null;
 }
 
 export interface MembershipRow {
@@ -21,21 +30,44 @@ export interface MembershipRow {
   renewal_period: string | null;
   external_subscription_id: string | null;
   subscription_tier?: SubscriptionTierRow | null;
+  tier?: SubscriptionTierRow | null;
+  period?: string | null;
+  renewalPeriod?: string | null;
+  is_paid?: boolean;
+  isPaid?: boolean;
 }
 
-export interface SubscriptionTierRow {
-  id: string;
-  name: string;
-  description: string | null;
-  price: number;
-  currency: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
+export interface SubscriptionSession {
+  clientUuid: string;
+  telegramUserId: number | null;
+  telegramLinked: boolean;
+  membership: MembershipRow | null;
+}
+
+export interface SubscriptionStatus {
+  clientUuid: string;
+  telegramLinked: boolean;
+  membership: MembershipRow | null;
+  isPaid: boolean;
+}
+
+export interface TelegramBindingResponse {
+  token: string;
+  botUrl: string | null;
+  loginWidgetAuthUrl: string | null;
+  expiresAt: string;
 }
 
 export interface SubscriptionApiError {
   error: string;
+}
+
+async function readError(response: Response): Promise<SubscriptionApiError> {
+  try {
+    return (await response.json()) as SubscriptionApiError;
+  } catch {
+    return { error: "Request failed" };
+  }
 }
 
 export const subscriptionsApi = {
@@ -48,34 +80,44 @@ export const subscriptionsApi = {
       body: JSON.stringify(data),
     });
 
-    if (!response.ok) {
-      const error = await response.json();
-      return error as SubscriptionApiError;
-    }
-
+    if (!response.ok) return readError(response);
     return response.json();
   },
 
-  async getMemberships(client_uuid: string): Promise<MembershipRow[] | SubscriptionApiError> {
-    const response = await fetch(`/api/subscriptions/memberships?client_uuid=${client_uuid}`, {
-      method: "GET",
-      headers: { "Content-Type": "application/json" },
-    });
-
-    if (!response.ok) {
-      const error = await response.json();
-      return error as SubscriptionApiError;
-    }
-
+  async getTiers(): Promise<SubscriptionTierRow[] | SubscriptionApiError> {
+    const response = await fetch("/api/subscriptions/tiers");
+    if (!response.ok) return readError(response);
     const data = await response.json();
-    return data.memberships || [];
+    return data.tiers || [];
   },
 
-  async getActiveTier(client_uuid: string): Promise<SubscriptionTierRow | null> {
-    const result = await this.getMemberships(client_uuid);
-    if (!result || "error" in result) return null;
+  async getSession(clientUuid: string): Promise<SubscriptionSession | SubscriptionApiError> {
+    const response = await fetch(`/api/subscriptions/session?client_uuid=${encodeURIComponent(clientUuid)}`);
+    if (!response.ok) return readError(response);
+    return response.json();
+  },
 
-    const active = result.find((m: MembershipRow) => m.status === "active");
-    return active?.subscription_tier || null;
+  async getStatus(clientUuid: string): Promise<SubscriptionStatus | SubscriptionApiError> {
+    const response = await fetch(`/api/subscriptions/status?client_uuid=${encodeURIComponent(clientUuid)}`);
+    if (!response.ok) return readError(response);
+    return response.json();
+  },
+
+  async createBinding(clientUuid: string): Promise<TelegramBindingResponse | SubscriptionApiError> {
+    const response = await fetch("/api/telegram/bindings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_uuid: clientUuid }),
+    });
+
+    if (!response.ok) return readError(response);
+    return response.json();
+  },
+
+  async getMemberships(clientUuid: string): Promise<MembershipRow[] | SubscriptionApiError> {
+    const response = await fetch(`/api/subscriptions/memberships?client_uuid=${encodeURIComponent(clientUuid)}`);
+    if (!response.ok) return readError(response);
+    const data = await response.json();
+    return data.memberships || [];
   },
 };

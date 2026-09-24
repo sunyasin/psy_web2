@@ -1,29 +1,23 @@
 "use client";
 
-import { useState } from "react";
-
 interface TelegramLinkDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  clientUuid: string;
-  telegramBotUrl: string;
+  botUrl: string | null;
+  loginWidgetAuthUrl: string | null;
+  expiresAt: string | null;
 }
 
 export function TelegramLinkDialog({
   open,
   onOpenChange,
-  clientUuid,
-  telegramBotUrl,
+  botUrl,
+  loginWidgetAuthUrl,
+  expiresAt,
 }: TelegramLinkDialogProps) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(clientUuid);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
   if (!open) return null;
+
+  const expiryText = expiresAt ? `Ссылка действительна до ${new Date(expiresAt).toLocaleTimeString()}` : "";
 
   return (
     <div
@@ -49,50 +43,59 @@ export function TelegramLinkDialog({
           padding: "24px",
           boxShadow: "0 20px 25px -5px rgba(0,0,0,0.1)",
         }}
-        onClick={(e) => e.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
       >
         <h2 style={{ fontSize: "18px", fontWeight: 600, marginBottom: "8px", color: "#18181b" }}>
           Привязка Telegram
         </h2>
         <p style={{ fontSize: "14px", color: "#71717a", marginBottom: "16px" }}>
-          Для оплаты необходимо привязать Telegram аккаунт. Откройте бот, отправьте{" "}
-          <code style={{ background: "#f4f4f5", padding: "2px 4px", borderRadius: "4px", fontSize: "12px" }}>/start</code>{" "}
-          и следуйте инструкциям.
+          сейчас откроется окно Telegram-бота. нажмите в окне Start
         </p>
+        {expiryText && <p style={{ fontSize: "12px", color: "#71717a", marginBottom: "16px" }}>{expiryText}</p>}
 
-        <div style={{ padding: "16px 0" }}>
-          <p style={{ fontSize: "14px", color: "#71717a", marginBottom: "8px" }}>
-            Ваш client_uuid для привязки:
-          </p>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <code
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "16px" }}>
+          {botUrl && (
+            <a
+              href={botUrl}
+              target="_blank"
+              rel="noreferrer"
               style={{
-                flex: 1,
+                padding: "10px 14px",
                 borderRadius: "6px",
-                backgroundColor: "#f4f4f5",
-                padding: "8px 12px",
-                fontSize: "13px",
-                fontFamily: "monospace",
-                wordBreak: "break-all",
-                overflow: "hidden",
+                border: "none",
+                background: "#000",
+                color: "#fff",
+                fontSize: "14px",
+                fontWeight: 500,
+                cursor: "pointer",
+                textAlign: "center",
+                textDecoration: "none",
               }}
             >
-              {clientUuid}
-            </code>
-            <button
-              onClick={handleCopy}
+              Открыть Telegram-бота
+            </a>
+          )}
+          {loginWidgetAuthUrl && (
+            <a
+              href={loginWidgetAuthUrl}
               style={{
-                padding: "6px 12px",
+                padding: "10px 14px",
                 borderRadius: "6px",
                 border: "1px solid #e4e4e7",
                 background: "#fff",
-                fontSize: "13px",
+                color: "#18181b",
+                fontSize: "14px",
                 cursor: "pointer",
+                textAlign: "center",
+                textDecoration: "none",
               }}
             >
-              {copied ? "Скопировано" : "Копировать"}
-            </button>
-          </div>
+              Привязать через Telegram
+            </a>
+          )}
+          {!botUrl && !loginWidgetAuthUrl && (
+            <p style={{ fontSize: "13px", color: "#ef4444" }}>Ссылка для привязки не настроена.</p>
+          )}
         </div>
 
         <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
@@ -108,27 +111,6 @@ export function TelegramLinkDialog({
             }}
           >
             Отмена
-          </button>
-          <button
-            onClick={() => window.open(telegramBotUrl, "_blank", "noopener,noreferrer")}
-            style={{
-              padding: "8px 16px",
-              borderRadius: "6px",
-              border: "none",
-              background: "#000",
-              color: "#fff",
-              fontSize: "14px",
-              fontWeight: 500,
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 2L2 12.5l4 1.5L7 22l5.5-3 3 5.5L21 2z" />
-            </svg>
-            Перейти в бот
           </button>
         </div>
       </div>

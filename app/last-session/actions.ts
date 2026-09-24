@@ -16,8 +16,16 @@ export interface LastSessionSummary {
   answerCount: number;
   completed: boolean;
   keyThemes: string[];
-  profileSnapshot?: any;
+  profileSnapshot?: Record<string, unknown> | null;
   ideas?: Idea[];
+}
+
+function extractFlatAnswers(answers: unknown): string[] {
+  if (!answers || typeof answers !== "object") return [];
+  const blockMap = answers as Record<string, unknown>;
+  return Object.values(blockMap)
+    .filter((block): block is Record<string, string> => typeof block === "object" && block !== null)
+    .flatMap((block) => Object.values(block));
 }
 
 export async function loadLastSessionSummary(clientUuid: string): Promise<LastSessionSummary | null> {
@@ -35,19 +43,12 @@ export async function loadLastSessionSummary(clientUuid: string): Promise<LastSe
     return null;
   }
 
-  const answers = (session.answers as Record<string, Record<string, string>>) || {};
-  const flatAnswers = Object.values(answers)
-    .filter((block) => typeof block === "object" && block !== null && block !== (answers as any).block4_trigger)
-    .flatMap((block) => {
-      if (block === (answers as any).block4_trigger) return [];
-      return Object.values(block as Record<string, string>);
-    });
-
+  const flatAnswers = extractFlatAnswers(session.answers);
   const answerCount = flatAnswers.length;
   const profileText = flatAnswers.join(" ").toLowerCase();
   const keyThemes = extractThemes(profileText);
 
-  let profileSnapshot: any = null;
+  let profileSnapshot: Record<string, unknown> | null = null;
   const { data: snapshot } = await supabase
     .from("profile_snapshots")
     .select("*")
@@ -104,14 +105,7 @@ export async function submitLastSessionMessage(
     throw new Error("No interview session found");
   }
 
-  const answers = (session.answers as Record<string, Record<string, string>>) || {};
-  const flatAnswers = Object.values(answers)
-    .filter((block) => typeof block === "object" && block !== null && block !== (answers as any).block4_trigger)
-    .flatMap((block) => {
-      if (block === (answers as any).block4_trigger) return [];
-      return Object.values(block as Record<string, string>);
-    });
-
+  const flatAnswers = extractFlatAnswers(session.answers);
   const profileText = flatAnswers.join(" ").toLowerCase();
   const keyThemes = extractThemes(profileText);
   const themesText = keyThemes.length > 0 ? keyThemes.join(", ") : "общие вопросы о жизни и целях";
@@ -153,7 +147,7 @@ function extractThemes(text: string): string[] {
     { theme: "работа / проекты", count: (text.match(/\b(проект|работа|задача|бизнес)\b/g) || []).length },
     { theme: "отношения / люди", count: (text.match(/\b(люди|отношения|семья|друзья|общение)\b/g) || []).length },
     { theme: "деньги / доход", count: (text.match(/\b(деньги|доход|зарплата|оплата|бюджет)\b/g) || []).length },
-    { theme: "здоровье / энергия", count: (text.match(/\b(здоровье|сон|усталость|энергия|спорт)\b/g) || []).length },
+    { theme: " здоровье / энергия", count: (text.match(/\b( здоровье|сон|усталость|энергия|спорт)\b/g) || []).length },
     { theme: "саморазвитие / навыки", count: (text.match(/\b(навык|изучать|учиться|развитие|курс)\b/g) || []).length },
     { theme: "смысл / призвание", count: (text.match(/\b(смысл|призвание|цель|мечта|важно)\b/g) || []).length },
   ];
@@ -176,11 +170,11 @@ function getFallbackResponse(message: string, history: LastSessionMessage[]): st
     return "Кажется, ты хочешь поработать с целями. Лучше всего для этого подходит страница /goals — там можно выбрать идеи из интервью и превратить их в конкретные цели.";
   }
 
-  if (lower.includes("проблема") || lower.includes("трудность") || lower.includes("не получается")) {
+  if (lower.includes("проблема") || lower.includes("сложность") || lower.includes("не получается")) {
     return "Если есть конкретная проблема, которая требует разбора — рекомендую перейти на /problem. Там мы можем разобрать точку А и точку Б.";
   }
 
-  if (lower.includes("область") || lower.includes("домен") || lower.includes("отношения") || lower.includes("деньги") || lower.includes("здоровье")) {
+  if (lower.includes("область") || lower.includes("домен") || lower.includes("отношения") || lower.includes("деньги") || lower.includes(" здоровья")) {
     return "Если хочешь поработать с конкретной областью жизни — переходи на /domain-screening. Там короткий скрининг по 6 доменам.";
   }
 

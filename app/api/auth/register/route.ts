@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { getSupabaseServerClient } from "@/lib/supabase";
 import type { ClientRow } from "@/lib/types";
 
 export async function POST(request: Request) {
@@ -25,13 +25,7 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!supabaseAdmin) {
-      return NextResponse.json(
-        { error: "Сервисный клиент Supabase не настроен" },
-        { status: 500 }
-      );
-    }
-
+    const supabaseAdmin = getSupabaseServerClient();
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
       email,
       password,

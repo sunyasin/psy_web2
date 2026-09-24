@@ -1,43 +1,41 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { subscriptionsApi, SubscriptionTierRow } from "@/lib/subscriptionsApi";
 import { SubscriptionPurchaseButton } from "./SubscriptionPurchaseButton";
 
 interface SubscriptionTiersListProps {
   clientUuid: string;
-  telegramLinked: boolean;
-  telegramBotUrl?: string;
 }
 
-export function SubscriptionTiersList({
-  clientUuid,
-  telegramLinked,
-  telegramBotUrl,
-}: SubscriptionTiersListProps) {
-  const router = useRouter();
+export function SubscriptionTiersList({ clientUuid }: SubscriptionTiersListProps) {
   const [tiers, setTiers] = useState<SubscriptionTierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
+
     const loadTiers = async () => {
       try {
-        const response = await fetch("/api/subscriptions/tiers");
-        if (response.ok) {
-          const result = await response.json();
-          setTiers(result.tiers || []);
+        const result = await subscriptionsApi.getTiers();
+        if (!active) return;
+        if (!result || "error" in result) {
+          setError(result?.error || "Не удалось загрузить тарифы");
+          return;
         }
-      } catch (err) {
-        console.error("Error loading tiers:", err);
-        setError("Не удалось загрузить тарифы");
+        setTiers(result);
+      } catch {
+        if (active) setError("Не удалось загрузить тарифы");
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
     loadTiers();
+    return () => {
+      active = false;
+    };
   }, []);
 
   if (loading) {
@@ -81,12 +79,9 @@ export function SubscriptionTiersList({
           <div style={{ marginTop: "24px" }}>
             <SubscriptionPurchaseButton
               subscriptionTierId={tier.id}
-              tierName={tier.name}
               price={tier.price}
+              currency={tier.currency}
               clientUuid={clientUuid}
-              telegramLinked={telegramLinked}
-              telegramBotUrl={telegramBotUrl}
-              onSuccess={() => router.push("/results")}
             />
           </div>
         </div>

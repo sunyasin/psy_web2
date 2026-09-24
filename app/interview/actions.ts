@@ -20,7 +20,7 @@ export async function startInterview(clientUuid: string, interviewId?: string): 
     resolvedInterviewId = defaultInterview.id;
   }
 
-  const sessionPayload: any = {
+  const sessionPayload: Record<string, unknown> = {
     client_uuid: clientUuid,
     interview_id: resolvedInterviewId,
     current_block: 1,
@@ -399,11 +399,8 @@ export async function analyzeInterviewAnswers(
 
   const answers = (session.answers as Record<string, Record<string, string>>) || {};
   const flatAnswers = Object.values(answers)
-    .filter((block) => typeof block === "object" && block !== null && block !== (answers as any).block4_trigger)
-    .flatMap((block) => {
-      if (block === (answers as any).block4_trigger) return [];
-      return Object.values(block as Record<string, string>);
-    });
+    .filter((block): block is Record<string, string> => typeof block === "object" && block !== null)
+    .flatMap((block) => Object.values(block));
 
   const answerCount = flatAnswers.length;
   const profileText = flatAnswers.join(" ").toLowerCase();

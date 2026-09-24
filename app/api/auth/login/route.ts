@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin, supabase } from "@/lib/supabase";
+import { getSupabaseServerClient, supabase } from "@/lib/supabase";
 import type { ClientRow } from "@/lib/types";
 
 export async function POST(request: Request) {
@@ -29,14 +29,8 @@ export async function POST(request: Request) {
       );
     }
 
-    if (!supabaseAdmin) {
-      return NextResponse.json(
-        { error: "Сервисный клиент Supabase не настроен" },
-        { status: 500 }
-      );
-    }
-
-    let client = await supabaseAdmin
+    const supabaseAdmin = getSupabaseServerClient();
+    const client = await supabaseAdmin
       .from("clients")
       .select("client_uuid, display_name, email, created_at")
       .eq("email", email)

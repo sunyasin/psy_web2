@@ -37,7 +37,6 @@ export default function IdeaPage() {
     }
 
     if (!goalId) {
-      setGoalsLoading(false);
       return;
     }
 

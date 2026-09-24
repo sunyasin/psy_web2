@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SubscriptionTiersList } from "@/components/SubscriptionTiersList";
 import { TelegramLinkDialog } from "@/components/TelegramLinkDialog";
+import { subscriptionsApi, SubscriptionSession } from "@/lib/subscriptionsApi";
 
 function getClientUuid(): string | null {
   try {
@@ -22,14 +23,17 @@ function LoadingSpinner() {
 export default function TariffsPage() {
   const router = useRouter();
   const [clientUuid, setClientUuid] = useState<string | null>(null);
-  const [telegramLinked, setTelegramLinked] = useState(false);
+  const [session, setSession] = useState<SubscriptionSession | null>(null);
   const [loading, setLoading] = useState(true);
-  const [showTelegramDialog, setShowTelegramDialog] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [binding, setBinding] = useState<{ botUrl: string | null; loginWidgetAuthUrl: string | null; expiresAt: string } | null>(null);
+  const [bindingError, setBindingError] = useState<string | null>(null);
 
-  const telegramBotUrl =
-    typeof window !== "undefined"
-      ? (localStorage.getItem("telegram_bot_url") || process.env.NEXT_PUBLIC_TELEGRAM_BOT_URL || "https://t.me/psy_goal_bot")
-      : "";
+  const loadSession = async (uuid: string) => {
+    const result = await subscriptionsApi.getSession(uuid);
+    if (!result || "error" in result) return;
+    setSession(result);
+  };
 
   useEffect(() => {
     const uuid = getClientUuid();
@@ -38,27 +42,40 @@ export default function TariffsPage() {
       return;
     }
 
-    setClientUuid(uuid);
-
-    const checkTelegram = async () => {
-      try {
-        const response = await fetch(`/api/subscriptions/memberships?client_uuid=${uuid}`);
-        if (response.ok) {
-          const data = await response.json();
-          const hasActive = (data.memberships || []).some((m: any) => m.status === "active");
-          setTelegramLinked(hasActive);
-        }
-      } catch {
-        // Ignore
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkTelegram();
+    window.setTimeout(() => {
+      setClientUuid(uuid);
+      loadSession(uuid).finally(() => setLoading(false));
+    }, 0);
   }, [router]);
 
-  if (loading || !clientUuid) {
+  useEffect(() => {
+    if (!dialogOpen || !clientUuid || session?.telegramLinked) return;
+
+    const timer = window.setInterval(() => {
+      loadSession(clientUuid);
+    }, 2500);
+
+    return () => window.clearInterval(timer);
+  }, [dialogOpen, clientUuid, session?.telegramLinked]);
+
+  const openBindingDialog = async () => {
+    if (!clientUuid) return;
+
+    setBindingError(null);
+    const result = await subscriptionsApi.createBinding(clientUuid);
+    if (!result || "error" in result) {
+      setBindingError(result?.error || "Не удалось создать ссылку для привязки");
+      return;
+    }
+
+    setBinding(result);
+    setDialogOpen(true);
+    if (result.botUrl) window.open(result.botUrl, "_blank", "noopener,noreferrer");
+  };
+
+  const telegramLinked = Boolean(session?.telegramLinked);
+
+  if (loading || !clientUuid || !session) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", backgroundColor: "#fafafa" }}>
         <main style={{ width: "100%", maxWidth: "896px", display: "flex", flexDirection: "column", alignItems: "center", padding: "64px 24px", backgroundColor: "#fff" }}>
@@ -74,27 +91,20 @@ export default function TariffsPage() {
       <main style={{ width: "100%", maxWidth: "896px", display: "flex", flexDirection: "column", alignItems: "center", padding: "64px 24px", backgroundColor: "#fff" }}>
         <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "32px" }}>
           <div style={{ textAlign: "center" }}>
-            <h1 style={{ fontSize: "24px", fontWeight: 600, color: "#000" }}>
-              Выберите тариф
-            </h1>
-            <p style={{ marginTop: "8px", fontSize: "14px", color: "#71717a" }}>
-              Подписка открывает все функции приложения
-            </p>
+            <h1 style={{ fontSize: "24px", fontWeight: 600, color: "#000" }}>Выберите тариф</h1>
+            <p style={{ marginTop: "8px", fontSize: "14px", color: "#71717a" }}>Подписка открывает все функции приложения</p>
           </div>
 
           {telegramLinked ? (
-            <SubscriptionTiersList
-              clientUuid={clientUuid}
-              telegramLinked={telegramLinked}
-            />
+            <SubscriptionTiersList clientUuid={clientUuid} />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "32px 0" }}>
               <p style={{ fontSize: "14px", color: "#71717a", textAlign: "center", maxWidth: "512px" }}>
                 Для оформления подписки необходимо привязать Telegram аккаунт.
-                Нажмите кнопку ниже для перехода в бота.
               </p>
+              {bindingError && <p style={{ fontSize: "13px", color: "#ef4444" }}>{bindingError}</p>}
               <button
-                onClick={() => setShowTelegramDialog(true)}
+                onClick={openBindingDialog}
                 style={{
                   borderRadius: "6px",
                   backgroundColor: "#000",
@@ -114,10 +124,11 @@ export default function TariffsPage() {
       </main>
 
       <TelegramLinkDialog
-        open={showTelegramDialog}
-        onOpenChange={setShowTelegramDialog}
-        clientUuid={clientUuid}
-        telegramBotUrl={telegramBotUrl || "https://t.me/"}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        botUrl={binding?.botUrl || null}
+        loginWidgetAuthUrl={binding?.loginWidgetAuthUrl || null}
+        expiresAt={binding?.expiresAt || null}
       />
     </div>
   );

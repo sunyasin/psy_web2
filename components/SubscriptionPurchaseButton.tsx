@@ -6,79 +6,66 @@ import { subscriptionsApi } from "@/lib/subscriptionsApi";
 
 interface SubscriptionPurchaseButtonProps {
   subscriptionTierId: string;
-  tierName: string;
   price: number;
+  currency: string;
   clientUuid: string;
-  telegramLinked: boolean;
-  telegramBotUrl?: string;
-  onSuccess?: () => void;
 }
 
 export function SubscriptionPurchaseButton({
   subscriptionTierId,
-  tierName,
   price,
+  currency,
   clientUuid,
-  telegramLinked,
-  telegramBotUrl,
-  onSuccess,
 }: SubscriptionPurchaseButtonProps) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubscribe = async () => {
-    if (!telegramLinked && telegramBotUrl) {
-      window.open(telegramBotUrl, "_blank", "noopener,noreferrer");
-      return;
-    }
+    setError(null);
+    setIsLoading(true);
 
     try {
-      setIsLoading(true);
-
       const result = await subscriptionsApi.createSubscription({
         client_uuid: clientUuid,
         subscriptionTierId,
       });
 
       if ("error" in result) {
-        console.error("Subscription error:", result.error);
+        setError(result.error);
         return;
       }
 
-      try {
-        localStorage.setItem("subscription_tier", "paid");
-      } catch { /* ignore */ }
-
-      if (onSuccess) {
-        onSuccess();
-      } else {
-        router.push("/results");
-      }
-    } catch (error) {
-      console.error("Error creating subscription:", error);
+      window.open(result.confirmationUrl, "_blank", "noopener,noreferrer");
+      router.push(`/payment-callback?transactionId=${encodeURIComponent(result.transactionId)}`);
+    } catch {
+      setError("Не удалось создать платёж");
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <button
-      onClick={handleSubscribe}
-      disabled={isLoading}
-      style={{
-        width: "100%",
-        borderRadius: "6px",
-        backgroundColor: "#000",
-        color: "#fff",
-        padding: "10px 16px",
-        fontSize: "14px",
-        fontWeight: 500,
-        cursor: isLoading ? "not-allowed" : "pointer",
-        opacity: isLoading ? 0.5 : 1,
-        border: "none",
-      }}
-    >
-      {isLoading ? "Обработка..." : `Оплатить ${price} ₽`}
-    </button>
+    <div>
+      <button
+        onClick={handleSubscribe}
+        disabled={isLoading}
+        style={{
+          width: "100%",
+          borderRadius: "6px",
+          backgroundColor: "#000",
+          color: "#fff",
+          padding: "10px 16px",
+          fontSize: "14px",
+          fontWeight: 500,
+          cursor: isLoading ? "not-allowed" : "pointer",
+          opacity: isLoading ? 0.5 : 1,
+          border: "none",
+        }}
+      >
+        {isLoading ? "Создаю платёж..." : `Оплатить ${price} ${currency}`}
+      </button>
+      {error && <p style={{ marginTop: "8px", fontSize: "12px", color: "#ef4444" }}>{error}</p>}
+    </div>
   );
 }

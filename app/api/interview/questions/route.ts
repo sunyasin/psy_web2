@@ -17,17 +17,25 @@ export async function GET(request: Request) {
     if (interviewId) {
       query = query.eq("interview_id", interviewId);
     } else {
-      const { data: interview, error: interviewError } = await supabase
-        .from("interview")
-        .select("id")
-        .eq("code", "default")
-        .single();
+      // Try to resolve the default interview; if the interview table is missing,
+      // fall back to all active configs (no interview_id filter).
+      try {
+        const { data: interview, error: interviewError } = await supabase
+          .from("interview")
+          .select("id")
+          .eq("code", "default")
+          .maybeSingle();
 
-      if (interviewError || !interview) {
-        return NextResponse.json({ error: "Default interview not found" }, { status: 500 });
+        if (interviewError && interviewError.code !== "PGRST205" && interviewError.code !== "42P01") {
+          throw interviewError;
+        }
+
+        if (interview) {
+          query = query.eq("interview_id", interview.id);
+        }
+      } catch {
+        // interview table may not exist; continue without interview_id filter
       }
-
-      query = query.eq("interview_id", interview.id);
     }
 
     const { data, error } = await query;
