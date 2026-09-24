@@ -22,11 +22,9 @@ export default function ResultsPage() {
   const [bookingSubmitting, setBookingSubmitting] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [showSendPopup, setShowSendPopup] = useState(false);
-  const [sendEmailInput, setSendEmailInput] = useState("");
   const [sendLoading, setSendLoading] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
-  const [sendViaEmail, setSendViaEmail] = useState(false);
   const [completedWithoutAnalysis, setCompletedWithoutAnalysis] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [subscriptionTier] = useState<string>(() => {
@@ -372,28 +370,26 @@ export default function ResultsPage() {
      }
    }
  
-   function openSendPopup() {
-     setShowSendPopup(true);
-     setSendEmailInput("");
-     setSendError(null);
-     setSendSuccess(false);
-   }
- 
-  function closeSendPopup() {
-    setShowSendPopup(false);
-    setSendEmailInput("");
-    setSendError(null);
-    setSendSuccess(false);
-    setSendViaEmail(false);
-  }
+    function openSendPopup() {
+      setShowSendPopup(true);
+      setSendError(null);
+      setSendSuccess(false);
+    }
+  
+    function closeSendPopup() {
+      setShowSendPopup(false);
+      setSendError(null);
+      setSendSuccess(false);
+    }
+
  
   async function handleTelegramSend() {
       const clientUuid = localStorage.getItem("client_uuid");
       if (!clientUuid || !currentResult) return;
-  
+    
       setSendLoading(true);
       setSendError(null);
-  
+    
       try {
         const resultsText = formatIdeasAsText(ideas);
         const res = await fetch("/api/send/telegram", {
@@ -419,48 +415,7 @@ export default function ResultsPage() {
         setSendLoading(false);
       }
     }
- 
-  async function handleEmailSend() {
-      const clientUuid = localStorage.getItem("client_uuid");
-      if (!clientUuid || !currentResult) return;
   
-      const email = sendEmailInput.trim();
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(email)) {
-        setSendError("Введите корректный адрес email");
-        return;
-      }
-  
-      setSendLoading(true);
-      setSendError(null);
-  
-      try {
-        const resultsText = formatIdeasAsText(ideas);
-        const res = await fetch("/api/send/email", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            client_uuid: clientUuid,
-            email: email,
-            results: {
-              ideas: ideas,
-              text: resultsText,
-              interview_name: currentResult.interview_name || null,
-            },
-          }),
-        });
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.error || "Ошибка отправки на email");
-        }
-        setSendSuccess(true);
-      } catch (err) {
-        setSendError(err instanceof Error ? err.message : "Ошибка соединения");
-      } finally {
-        setSendLoading(false);
-      }
-    }
- 
    if (loading) {
     return (
       <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
@@ -708,83 +663,46 @@ className={`cursor-pointer rounded-xl border-2 p-5 transition-colors ${
                  Отправить результаты анкеты
                </h3>
 
-               {sendSuccess ? (
-                 <div>
-                   <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300">
-                     Результаты успешно отправлены!
-                   </div>
-                   <button
-                     onClick={closeSendPopup}
-                     className="mt-4 w-full rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-                   >
-                     Закрыть
-                   </button>
-                 </div>
-               ) : sendViaEmail ? (
-                 <div className="space-y-3">
-                   <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                     Введите адрес email
-                   </label>
-                   <input
-                     type="email"
-                     value={sendEmailInput}
-                     onChange={(e) => setSendEmailInput(e.target.value)}
-                     placeholder="example@mail.com"
-                     className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-black shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:focus:border-white"
-                     disabled={sendLoading}
-                   />
-                   {sendError && (
-                     <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-                       {sendError}
-                     </div>
-                   )}
-                   <div className="flex gap-3">
-                     <button
-                       onClick={() => setSendViaEmail(false)}
-                       className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-                       disabled={sendLoading}
-                     >
-                       Назад
-                     </button>
-                     <button
-                       onClick={handleEmailSend}
-                       disabled={sendLoading || !sendEmailInput.trim()}
-                       className="flex-1 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-                     >
-                       {sendLoading ? "Отправляю..." : "Отправить"}
-                     </button>
-                   </div>
-                 </div>
-               ) : (
-                 <div className="space-y-4">
-                   <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                     Выберите способ отправки результатов:
-                   </p>
-                   {sendError && (
-                     <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
-                       {sendError}
-                     </div>
-                   )}
-                   <div className="grid grid-cols-2 gap-3">
-                     <button
-                       onClick={handleTelegramSend}
-                       disabled={sendLoading || sendSuccess}
-                       className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-4 py-4 transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-                     >
-                       <TelegramIcon />
-                       <span className="mt-2 text-sm font-medium text-black dark:text-zinc-50">Telegram</span>
-                     </button>
-                     <button
-                       onClick={() => { setSendViaEmail(true); setSendError(null); }}
-                       disabled={sendLoading || sendSuccess}
-                       className="flex flex-col items-center justify-center rounded-lg border border-zinc-200 bg-white px-4 py-4 transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-                     >
-                       <EmailIcon />
-                       <span className="mt-2 text-sm font-medium text-black dark:text-zinc-50">Email</span>
-                     </button>
-                   </div>
-                 </div>
-               )}
+                {sendSuccess ? (
+                  <div>
+                    <div className="rounded-lg border border-green-200 bg-green-50 p-3 text-sm text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300">
+                      Результаты успешно отправлены!
+                    </div>
+                    <button
+                      onClick={closeSendPopup}
+                      className="mt-4 w-full rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                    >
+                      Закрыть
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      Отправить результаты в Telegram?
+                    </p>
+                    {sendError && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+                        {sendError}
+                      </div>
+                    )}
+                    <div className="flex gap-3">
+                      <button
+                        onClick={closeSendPopup}
+                        className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+                        disabled={sendLoading}
+                      >
+                        Отмена
+                      </button>
+                      <button
+                        onClick={handleTelegramSend}
+                        disabled={sendLoading || sendSuccess}
+                        className="flex-1 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                      >
+                        {sendLoading ? "Отправляю..." : "Отправить в Telegram"}
+                      </button>
+                    </div>
+                  </div>
+                )}
              </div>
            </div>
          )}
