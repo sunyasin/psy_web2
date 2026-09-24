@@ -76,7 +76,7 @@ export default function Home() {
             <div className="space-y-3">
               {hasCompleted ? (
                 <>
-                  <button
+                  {/* <button
                     onClick={() => (window.location.href = "/last-session")}
                     className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
                   >
@@ -94,7 +94,7 @@ export default function Home() {
                     <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                       Посмотреть список целей, добавить новую или обсудить прогресс
                     </span>
-                  </button>
+                  </button> */}
 
                   <button
                     onClick={() => (window.location.href = "/results")}
@@ -138,14 +138,14 @@ export default function Home() {
                 </span>
               </button>
 
-              {hasCompleted && (
+              {/* {hasCompleted && (
                 <button
                   onClick={() => (window.location.href = "/results")}
                   className="w-full rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
                 >
                   Посмотреть ответы
                 </button>
-              )}
+              )} */}
             </div>
           </div>
         </main>
