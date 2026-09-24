@@ -28,9 +28,13 @@ export async function startInterview(clientUuid: string, interviewId?: string): 
     answers: {},
   };
 
+  // Upsert: insert if not exists, update if exists (unique on client_uuid + interview_id)
   const { data: session, error: sessionError } = await supabase
     .from("interview_sessions")
-    .insert(sessionPayload)
+    .upsert(sessionPayload, {
+      onConflict: "client_uuid,interview_id",
+      ignoreDuplicates: false,
+    })
     .select("*")
     .single();
 

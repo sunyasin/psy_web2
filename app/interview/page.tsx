@@ -14,6 +14,7 @@ export default function InterviewPage() {
   const [answer, setAnswer] = useState("");
   const [allQuestions, setAllQuestions] = useState<InterviewConfigRow[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState<string>("");
 
   useEffect(() => {
     const clientUuid = localStorage.getItem("client_uuid");
@@ -85,8 +86,7 @@ export default function InterviewPage() {
       setSending(false);
     }
   }
-
-  async function handleForward() {
+async function handleForward() {
     if (!question) return;
 
     const clientUuid = localStorage.getItem("client_uuid");
@@ -95,11 +95,12 @@ export default function InterviewPage() {
     const currentAnswer = answer.trim();
     if (currentAnswer && question) {
       setSending(true);
+
       try {
         const next = await submitAnswer(clientUuid, currentAnswer, question.blockNumber, question.order);
         setQuestion(next);
         setAnswer("");
-        
+
         const blockAnswers = await fetch(`/api/interview/answers?client_uuid=${clientUuid}`).then((r) => r.json());
         if (blockAnswers.answers && next) {
           const nextBlockAnswers = blockAnswers.answers[next.blockNumber.toString()] || {};
@@ -458,6 +459,27 @@ export default function InterviewPage() {
     );
   }
 
+  if (analyzing) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-8 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
+          <div className="mb-6 text-center">
+            <div className="mx-auto mb-4 h-12 w-12 rounded-full border-4 border-zinc-200 border-t-black animate-spin dark:border-zinc-700 dark:border-t-white" />
+            <h2 className="text-xl font-semibold text-black dark:text-zinc-50">Синтез профиля</h2>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Анализируем ваши ответы...</p>
+          </div>
+          <div className="rounded-md bg-zinc-100 p-3 dark:bg-zinc-800">
+            <div className="mb-2 text-xs text-zinc-500 dark:text-zinc-400">Этап:</div>
+            <div className="h-2 w-full rounded-full bg-zinc-200 overflow-hidden dark:bg-zinc-700">
+              <div className="h-full bg-black rounded-full transition-all duration-300 dark:bg-white" style={{ width: "66%" }} />
+            </div>
+            <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300 text-center">{analysisProgress}</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const currentBlock = allQuestions.find((b) => b.block_number === question.blockNumber);
   const sortedQuestions = currentBlock?.questions?.sort((a, b) => a.order - b.order) || [];
   const currentIndex = sortedQuestions.findIndex((q) => q.order === question.order);
@@ -534,12 +556,6 @@ export default function InterviewPage() {
           </div>
 
           {question.completed && (
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-              Интервью завершено. Далее — синтез профиля.
-            </div>
-          )}
-
-          {question.completed && (
             <button
               onClick={async () => {
                 setAnalyzing(true);
@@ -558,9 +574,9 @@ export default function InterviewPage() {
                 }
               }}
               disabled={analyzing}
-              className="w-full rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black hover:shadow-sm disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+              className="w-full rounded-md bg-black px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
             >
-              {analyzing ? "Анализирую..." : "Анализ ответов"}
+              {analyzing ? "Анализирую..." : "Анализировать ответы"}
             </button>
           )}
         </div>

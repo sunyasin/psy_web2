@@ -435,9 +435,18 @@ export default function ResultsPage() {
               )}
               {ideas.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center">
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
                     Нет результатов. Пройдите интервью, чтобы получить анализ.
                   </p>
+                  <button
+                    onClick={() => {
+                      localStorage.setItem("selected_interview_id", selectedInterviewId);
+                      router.push("/interview");
+                    }}
+                    className="rounded-md bg-black px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                  >
+                    Пройти интервью
+                  </button>
                 </div>
               ) : (
                 <div className="space-y-4">

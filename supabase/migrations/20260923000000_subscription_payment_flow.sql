@@ -82,3 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_transactions_telegram_user_id
 ALTER TABLE transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE telegram_binding_tokens DISABLE ROW LEVEL SECURITY;
 ALTER TABLE memberships DISABLE ROW LEVEL SECURITY;
+
+-- Уникальное ограничение: одна сессия на (клиент, интервью)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_sessions_client_interview
+  ON interview_sessions(client_uuid, interview_id);
