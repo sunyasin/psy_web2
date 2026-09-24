@@ -27,6 +27,8 @@ export default function ResultsPage() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [sendViaEmail, setSendViaEmail] = useState(false);
+  const [completedWithoutAnalysis, setCompletedWithoutAnalysis] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [subscriptionTier] = useState<string>(() => {
     try {
       return typeof window !== "undefined" ? (localStorage.getItem("subscription_tier") || "free_trial") : "free_trial";
@@ -144,6 +146,35 @@ export default function ResultsPage() {
     })();
   }, [selectedInterviewId, interviews]);
 
+  useEffect(() => {
+    if (!selectedInterviewId) {
+      setCompletedWithoutAnalysis(false);
+      return;
+    }
+
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid) return;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_id=${selectedInterviewId}`);
+        const data = await res.json();
+        if (data.completed) {
+          // Check if analysis exists for this interview
+          const resultsRes = await fetch(`/api/results?client_uuid=${clientUuid}&interview_id=${selectedInterviewId}`);
+          const resultsData = await resultsRes.json();
+          const hasAnalysis = resultsData.results && resultsData.results.length > 0;
+          setCompletedWithoutAnalysis(!hasAnalysis);
+        } else {
+          setCompletedWithoutAnalysis(false);
+        }
+      } catch (err) {
+        console.error("Failed to check completed status:", err);
+        setCompletedWithoutAnalysis(false);
+      }
+    })();
+  }, [selectedInterviewId]);
+
   const currentResult = results[0] || null;
   const ideas: Idea[] = currentResult?.ideas || [];
 
@@ -189,6 +220,37 @@ export default function ResultsPage() {
   function handleRetake() {
     localStorage.setItem("selected_interview_id", selectedInterviewId);
     window.location.href = "/interview";
+  }
+
+  async function handleStartAnalysis() {
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid || !selectedInterviewId) return;
+
+    setAnalyzing(true);
+    setSelectionError(null);
+
+    try {
+      const res = await fetch("/api/interview/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_uuid: clientUuid, interview_id: selectedInterviewId }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Ошибка запуска анализа");
+      }
+
+      // Reload results after analysis
+      const resultsRes = await fetch(`/api/results?client_uuid=${clientUuid}&interview_id=${selectedInterviewId}`);
+      const resultsData = await resultsRes.json();
+      setResults(resultsData.results || []);
+      setCompletedWithoutAnalysis(false);
+    } catch (err) {
+      setSelectionError(err instanceof Error ? err.message : "Ошибка соединения");
+    } finally {
+      setAnalyzing(false);
+    }
   }
 
   function handleSelfTry() {
@@ -433,7 +495,20 @@ export default function ResultsPage() {
                   Тариф: бесплатный пробный период
                 </div>
               )}
-              {ideas.length === 0 ? (
+              {completedWithoutAnalysis ? (
+                <div className="flex h-full flex-col items-center justify-center text-center">
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
+                    Интервью окончено. Теперь у меня есть достаточно информации для анализа
+                  </p>
+                  <button
+                    onClick={handleStartAnalysis}
+                    disabled={analyzing}
+                    className="rounded-md bg-black px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                  >
+                    {analyzing ? "Анализирую..." : "Начать анализ интервью"}
+                  </button>
+                </div>
+              ) : ideas.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center">
                   <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
                     Нет результатов. Пройдите интервью, чтобы получить анализ.
