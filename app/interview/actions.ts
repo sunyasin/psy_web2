@@ -64,7 +64,7 @@ export async function submitAnswer(
   const s = session as InterviewSessionRow;
   const answers = s.answers || {};
 
-  const blockConfig = await getBlockConfig(blockNumber);
+  const blockConfig = await getBlockConfig(blockNumber, s.interview_id);
   if (!blockConfig) {
     throw new Error(`Block ${blockNumber} config not found`);
   }
@@ -241,7 +241,7 @@ async function getNextQuestion(
   session: InterviewSessionRow,
   lastAnsweredOrder?: number
 ): Promise<InterviewQuestionResult> {
-  const blockConfig = await getBlockConfig(session.current_block);
+  const blockConfig = await getBlockConfig(session.current_block, session.interview_id);
   if (!blockConfig) {
     throw new Error(`Block ${session.current_block} config not found`);
   }
@@ -323,7 +323,7 @@ async function getNextQuestion(
     .update({ current_block: nextBlock })
     .eq("id", session.id);
 
-  const nextBlockConfig = await getBlockConfig(nextBlock);
+  const nextBlockConfig = await getBlockConfig(nextBlock, session.interview_id);
   if (!nextBlockConfig) {
     throw new Error(`Block ${nextBlock} config not found`);
   }
@@ -340,14 +340,19 @@ async function getNextQuestion(
   };
 }
 
-async function getBlockConfig(blockNumber: number): Promise<InterviewConfigRow | null> {
+async function getBlockConfig(blockNumber: number, interviewId?: string): Promise<InterviewConfigRow | null> {
   const supabase = getSupabaseServerClient();
-  const { data, error } = await supabase
+  let query = supabase
     .from("interview_config")
     .select("*")
     .eq("block_number", blockNumber)
-    .eq("active", true)
-    .single();
+    .eq("active", true);
+
+  if (interviewId) {
+    query = query.eq("interview_id", interviewId);
+  }
+
+  const { data, error } = await query.single();
 
   if (error || !data) {
     return null;
