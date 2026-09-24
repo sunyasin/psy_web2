@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { subscriptionsApi } from "@/lib/subscriptionsApi";
 
@@ -9,6 +9,7 @@ interface SubscriptionPurchaseButtonProps {
   price: number;
   currency: string;
   clientUuid: string;
+  paymentUrl: string | null;
 }
 
 export function SubscriptionPurchaseButton({
@@ -16,14 +17,21 @@ export function SubscriptionPurchaseButton({
   price,
   currency,
   clientUuid,
+  paymentUrl,
 }: SubscriptionPurchaseButtonProps) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const popupRef = useRef<Window | null>(null);
 
   const handleSubscribe = async () => {
     setError(null);
     setIsLoading(true);
+
+    // Open popup immediately to avoid browser popup blocker
+    if (paymentUrl) {
+      popupRef.current = window.open(paymentUrl, "_blank", "noopener,noreferrer");
+    }
 
     try {
       const result = await subscriptionsApi.createSubscription({
@@ -33,13 +41,26 @@ export function SubscriptionPurchaseButton({
 
       if ("error" in result) {
         setError(result.error);
+        // Close popup if there was an error
+        if (popupRef.current && !popupRef.current.closed) {
+          popupRef.current.close();
+        }
         return;
       }
 
-      window.open(result.confirmationUrl, "_blank", "noopener,noreferrer");
+      // If the popup was opened and the API returned a confirmation URL,
+      // update the popup location (in case it's different from paymentUrl)
+      if (popupRef.current && !popupRef.current.closed && result.confirmationUrl) {
+        popupRef.current.location.href = result.confirmationUrl;
+      }
+
       router.push(`/payment-callback?transactionId=${encodeURIComponent(result.transactionId)}`);
     } catch {
       setError("Не удалось создать платёж");
+      // Close popup on error
+      if (popupRef.current && !popupRef.current.closed) {
+        popupRef.current.close();
+      }
     } finally {
       setIsLoading(false);
     }

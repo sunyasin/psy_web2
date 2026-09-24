@@ -82,6 +82,7 @@ export function SubscriptionTiersList({ clientUuid }: SubscriptionTiersListProps
               price={tier.price}
               currency={tier.currency}
               clientUuid={clientUuid}
+              paymentUrl={tier.paymentUrl}
             />
           </div>
         </div>
