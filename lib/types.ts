@@ -253,6 +253,9 @@ export interface InterviewAnalysisRow {
   model_used?: string | null;
   answer_count: number;
   created_at: string;
+  interview_id?: string | null;
+  interview_name?: string | null;
+  session_status?: string | null;
 }
 
 export interface GoalRow {

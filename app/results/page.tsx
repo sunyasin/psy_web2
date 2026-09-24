@@ -178,6 +178,12 @@ export default function ResultsPage() {
   const currentResult = results[0] || null;
   const ideas: Idea[] = currentResult?.ideas || [];
 
+  const formatIdeasAsText = (ideasList: Idea[]): string => {
+    return ideasList
+      .map((idea, idx) => `${idx + 1}. ${idea.title}\n${idea.description}`)
+      .join("\n\n");
+  };
+
   function toggleGoalSelection(goalId: string) {
     setSelectedGoalId((prev) => (prev === goalId ? null : goalId));
     setSabotageAnalysis(null);
@@ -381,69 +387,79 @@ export default function ResultsPage() {
     setSendViaEmail(false);
   }
  
-   async function handleTelegramSend() {
-     const clientUuid = localStorage.getItem("client_uuid");
-     if (!clientUuid || !currentResult) return;
+  async function handleTelegramSend() {
+      const clientUuid = localStorage.getItem("client_uuid");
+      if (!clientUuid || !currentResult) return;
+  
+      setSendLoading(true);
+      setSendError(null);
+  
+      try {
+        const resultsText = formatIdeasAsText(ideas);
+        const res = await fetch("/api/send/telegram", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            client_uuid: clientUuid,
+            results: {
+              ideas: ideas,
+              text: resultsText,
+              interview_name: currentResult.interview_name || null,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Ошибка отправки в Telegram");
+        }
+        setSendSuccess(true);
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : "Ошибка соединения");
+      } finally {
+        setSendLoading(false);
+      }
+    }
  
-     setSendLoading(true);
-     setSendError(null);
- 
-     try {
-       const res = await fetch("/api/send/telegram", {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({
-           client_uuid: clientUuid,
-           results: currentResult,
-         }),
-       });
-       if (!res.ok) {
-         const data = await res.json();
-         throw new Error(data.error || "Ошибка отправки в Telegram");
-       }
-       setSendSuccess(true);
-     } catch (err) {
-       setSendError(err instanceof Error ? err.message : "Ошибка соединения");
-     } finally {
-       setSendLoading(false);
-     }
-   }
- 
-   async function handleEmailSend() {
-     const clientUuid = localStorage.getItem("client_uuid");
-     if (!clientUuid || !currentResult) return;
- 
-     const email = sendEmailInput.trim();
-     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-     if (!emailRegex.test(email)) {
-       setSendError("Введите корректный адрес email");
-       return;
-     }
- 
-     setSendLoading(true);
-     setSendError(null);
- 
-     try {
-       const res = await fetch("/api/send/email", {
-         method: "POST",
-         headers: { "Content-Type": "application/json" },
-         body: JSON.stringify({
-           client_uuid: clientUuid,
-           email: email,
-           results: currentResult,
-         }),
-       });
-       if (!res.ok) {
-         const data = await res.json();
-         throw new Error(data.error || "Ошибка отправки на email");
-       }
-       setSendSuccess(true);
-     } catch (err) {
-       setSendError(err instanceof Error ? err.message : "Ошибка соединения");
-     } finally {
-       setSendLoading(false);
-     }
-   }
+  async function handleEmailSend() {
+      const clientUuid = localStorage.getItem("client_uuid");
+      if (!clientUuid || !currentResult) return;
+  
+      const email = sendEmailInput.trim();
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        setSendError("Введите корректный адрес email");
+        return;
+      }
+  
+      setSendLoading(true);
+      setSendError(null);
+  
+      try {
+        const resultsText = formatIdeasAsText(ideas);
+        const res = await fetch("/api/send/email", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            client_uuid: clientUuid,
+            email: email,
+            results: {
+              ideas: ideas,
+              text: resultsText,
+              interview_name: currentResult.interview_name || null,
+            },
+          }),
+        });
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Ошибка отправки на email");
+        }
+        setSendSuccess(true);
+      } catch (err) {
+        setSendError(err instanceof Error ? err.message : "Ошибка соединения");
+      } finally {
+        setSendLoading(false);
+      }
+    }
  
    if (loading) {
     return (

@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Telegram account is not linked" }, { status: 409 });
     }
 
-    const text = results ? JSON.stringify(results, null, 2).slice(0, 4000) : "Результаты анкеты";
+    const text = results?.text || (results ? JSON.stringify(results, null, 2).slice(0, 4000) : "Результаты анкеты");
     const success = await sendTelegramMessage(BOT_TOKEN, client.telegram_chat_id, `📋 Результаты анкеты:\n\n${text}`);
 
     if (!success) {
