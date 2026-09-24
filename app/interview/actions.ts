@@ -284,8 +284,13 @@ async function getNextQuestion(
   }
 
   // All questions in current block answered - move to next block
-  if (session.current_block === 6) {
-    const supabase = getSupabaseServerClient();
+  const nextBlock = session.current_block + 1;
+  const supabase = getSupabaseServerClient();
+
+  // Check if next block exists before advancing
+  const nextBlockConfig = await getBlockConfig(nextBlock, session.interview_id);
+  if (!nextBlockConfig) {
+    // No next block - interview is complete
     await supabase
       .from("interview_sessions")
       .update({ status: "completed" })
@@ -302,31 +307,11 @@ async function getNextQuestion(
     };
   }
 
-  if (session.current_block === 3 && !answers.block4_trigger) {
-    return {
-      sessionId: session.id,
-      blockNumber: session.current_block,
-      order: 0,
-      text:
-        blockConfig.trigger_question ||
-        "За последние 12 месяцев у тебя было существенное изменение в жизни — переезд, смена семейного статуса, значимая потеря или внезапный рост (в доходе, статусе, обстоятельствах)?",
-      isLast: false,
-      totalInBlock: questions.length,
-      completed: false,
-    };
-  }
-
-  const nextBlock = session.current_block + 1;
-  const supabase = getSupabaseServerClient();
+  // Next block exists - advance to it
   await supabase
     .from("interview_sessions")
     .update({ current_block: nextBlock })
     .eq("id", session.id);
-
-  const nextBlockConfig = await getBlockConfig(nextBlock, session.interview_id);
-  if (!nextBlockConfig) {
-    throw new Error(`Block ${nextBlock} config not found`);
-  }
 
   const nextQuestions = nextBlockConfig.questions.sort((a, b) => a.order - b.order);
   return {
