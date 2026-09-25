@@ -15,11 +15,12 @@ export default function InterviewPage() {
   const [allQuestions, setAllQuestions] = useState<InterviewConfigRow[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<string>("");
+  const [resolvedInterviewId, setResolvedInterviewId] = useState<string | null>(null);
 
   useEffect(() => {
     const clientUuid = localStorage.getItem("client_uuid");
     const name = localStorage.getItem("display_name");
-    const selectedInterviewId = localStorage.getItem("selected_interview_id");
+    const selectedInterviewCode = localStorage.getItem("selected_interview_code");
 
     if (!clientUuid) {
       window.location.href = "/";
@@ -30,9 +31,20 @@ export default function InterviewPage() {
 
     (async () => {
       try {
+        // Resolve interview ID from code
+        let interviewId: string | undefined;
+        if (selectedInterviewCode) {
+          const res = await fetch(`/api/interview/resolve-id?code=${selectedInterviewCode}`);
+          const data = await res.json();
+          if (data.interview_id) {
+            interviewId = data.interview_id;
+            setResolvedInterviewId(data.interview_id);
+          }
+        }
+
         const [questionsData, existing] = await Promise.all([
-          fetch(`/api/interview/questions${selectedInterviewId ? `?interview_id=${selectedInterviewId}` : ""}`).then((r) => r.json()),
-          loadExistingSession(clientUuid, selectedInterviewId || undefined),
+          fetch(`/api/interview/questions${interviewId ? `?interview_id=${interviewId}` : ""}`).then((r) => r.json()),
+          loadExistingSession(clientUuid, interviewId),
         ]);
 
         if (questionsData.blocks) {
@@ -42,7 +54,7 @@ export default function InterviewPage() {
         if (existing) {
           setQuestion(existing);
         } else {
-          const q = await startInterview(clientUuid, selectedInterviewId || undefined);
+          const q = await startInterview(clientUuid, interviewId);
           setQuestion(q);
         }
       } catch (err) {
@@ -55,7 +67,8 @@ export default function InterviewPage() {
 
   useEffect(() => {
     if (allQuestions.length > 0 && question) {
-      fetch(`/api/interview/answers?client_uuid=${localStorage.getItem("client_uuid")}`)
+      const clientUuid = localStorage.getItem("client_uuid");
+      fetch(`/api/interview/answers?client_uuid=${clientUuid}${resolvedInterviewId ? `&interview_id=${resolvedInterviewId}` : ""}`)
         .then((r) => r.json())
         .then((data) => {
           if (data.answers && question) {
@@ -79,7 +92,10 @@ export default function InterviewPage() {
     setSending(true);
 
     try {
-      await updateAnswer(clientUuid, question.blockNumber, question.order, answer.trim());
+      const currentAnswer = answer.trim();
+      const next = await submitAnswer(clientUuid, currentAnswer, question.blockNumber, question.order, resolvedInterviewId || undefined);
+      setQuestion(next);
+      setAnswer("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Ошибка сохранения");
     } finally {
@@ -97,11 +113,11 @@ async function handleForward() {
       setSending(true);
 
       try {
-        const next = await submitAnswer(clientUuid, currentAnswer, question.blockNumber, question.order);
+        const next = await submitAnswer(clientUuid, currentAnswer, question.blockNumber, question.order, resolvedInterviewId || undefined);
         setQuestion(next);
         setAnswer("");
 
-        const blockAnswers = await fetch(`/api/interview/answers?client_uuid=${clientUuid}`).then((r) => r.json());
+        const blockAnswers = await fetch(`/api/interview/answers?client_uuid=${clientUuid}${resolvedInterviewId ? `&interview_id=${resolvedInterviewId}` : ""}`).then((r) => r.json());
         if (blockAnswers.answers && next) {
           const nextBlockAnswers = blockAnswers.answers[next.blockNumber.toString()] || {};
           const nextExisting = nextBlockAnswers[next.order.toString()];
@@ -128,7 +144,7 @@ async function handleForward() {
     const currentAnswer = answer.trim();
     if (currentAnswer) {
       try {
-        await updateAnswer(clientUuid, question.blockNumber, question.order, currentAnswer);
+        await updateAnswer(clientUuid, question.blockNumber, question.order, currentAnswer, resolvedInterviewId || undefined);
       } catch (err) {
         console.error("Failed to save answer before going back:", err);
       }
@@ -136,16 +152,21 @@ async function handleForward() {
 
     setSending(true);
     try {
-      const { data: session } = await supabase
+      let sessionQuery = supabase
         .from("interview_sessions")
         .select("*")
         .eq("client_uuid", clientUuid)
         .eq("status", "in_progress")
         .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (!session) {
+      if (resolvedInterviewId) {
+        sessionQuery = sessionQuery.eq("interview_id", resolvedInterviewId);
+      }
+
+      const { data: session, error: sessionError } = await sessionQuery.single();
+
+      if (sessionError || !session) {
         setError("Сессия не найдена");
         setSending(false);
         return;
@@ -226,7 +247,7 @@ async function handleForward() {
     const currentAnswer = answer.trim();
     if (currentAnswer) {
       try {
-        await updateAnswer(clientUuid, question.blockNumber, question.order, currentAnswer);
+        await updateAnswer(clientUuid, question.blockNumber, question.order, currentAnswer, resolvedInterviewId || undefined);
       } catch (err) {
         console.error("Failed to save answer before going to start:", err);
       }
@@ -234,16 +255,21 @@ async function handleForward() {
 
     setSending(true);
     try {
-      const { data: session } = await supabase
+      let sessionQuery = supabase
         .from("interview_sessions")
         .select("*")
         .eq("client_uuid", clientUuid)
         .eq("status", "in_progress")
         .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (!session) {
+      if (resolvedInterviewId) {
+        sessionQuery = sessionQuery.eq("interview_id", resolvedInterviewId);
+      }
+
+      const { data: session, error: sessionError } = await sessionQuery.single();
+
+      if (sessionError || !session) {
         setError("Сессия не найдена");
         setSending(false);
         return;
@@ -296,7 +322,7 @@ async function handleForward() {
     const currentAnswer = answer.trim();
     if (currentAnswer) {
       try {
-        await updateAnswer(clientUuid, question.blockNumber, question.order, currentAnswer);
+        await updateAnswer(clientUuid, question.blockNumber, question.order, currentAnswer, resolvedInterviewId || undefined);
       } catch (err) {
         console.error("Failed to save answer before skipping:", err);
       }
@@ -304,16 +330,21 @@ async function handleForward() {
 
     setSending(true);
     try {
-      const { data: session } = await supabase
+      let sessionQuery = supabase
         .from("interview_sessions")
         .select("*")
         .eq("client_uuid", clientUuid)
         .eq("status", "in_progress")
         .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
-      if (!session) {
+      if (resolvedInterviewId) {
+        sessionQuery = sessionQuery.eq("interview_id", resolvedInterviewId);
+      }
+
+      const { data: session, error: sessionError } = await sessionQuery.single();
+
+      if (sessionError || !session) {
         setError("Сессия не найдена");
         setSending(false);
         return;
@@ -412,7 +443,8 @@ async function handleForward() {
     
     if (currentIndex < sortedQuestions.length - 1) return true;
     
-    if (question.blockNumber < 6) {
+    const maxBlock = Math.max(...allQuestions.map((b) => b.block_number));
+    if (question.blockNumber < maxBlock) {
       const nextBlock = allQuestions.find((b) => b.block_number === question.blockNumber + 1);
       return !!nextBlock;
     }
@@ -500,30 +532,32 @@ async function handleForward() {
             </button>
           </div>
 
-          <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="text-xs text-zinc-500 mb-2">
-              Блок {question.blockNumber}: {currentBlock?.block_name} · Вопрос {question.order} из {question.totalInBlock}
+          {!question.completed && (
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-6 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="text-xs text-zinc-500 mb-2">
+                Блок {question.blockNumber}: {currentBlock?.block_name} · Вопрос {question.order} из {question.totalInBlock}
+              </div>
+              <p className="text-base font-medium text-black dark:text-zinc-50 mb-4">
+                {question.text}
+              </p>
+              <textarea
+                value={answer}
+                onChange={(e) => setAnswer(e.target.value)}
+                rows={4}
+                className="block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-black shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:focus:border-white"
+                placeholder="Твой ответ..."
+                disabled={sending}
+              />
             </div>
-            <p className="text-base font-medium text-black dark:text-zinc-50 mb-4">
-              {question.text}
-            </p>
-            <textarea
-              value={answer}
-              onChange={(e) => setAnswer(e.target.value)}
-              rows={4}
-              className="block w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-black shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:focus:border-white"
-              placeholder="Твой ответ..."
-              disabled={sending}
-            />
-          </div>
+          )}
 
           <div className="flex gap-2">
             <button
-              onClick={handleToStart}
+              onClick={handleSkipUnanswered}
               disabled={sending}
               className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
             >
-              В начало
+              В конец
             </button>
             <button
               onClick={handleBack}
@@ -532,13 +566,15 @@ async function handleForward() {
             >
               Назад
             </button>
-            <button
-              onClick={handleSave}
-              disabled={sending || !answer.trim()}
-              className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-            >
-              {sending ? "Сохраняю..." : "Сохранить"}
-            </button>
+            {!question.completed && (
+              <button
+                onClick={handleSave}
+                disabled={sending || !answer.trim()}
+                className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+              >
+                {sending ? "Сохраняю..." : "Сохранить"}
+              </button>
+            )}
             <button
               onClick={handleForward}
               disabled={sending || !hasNextQuestion()}
@@ -551,7 +587,7 @@ async function handleForward() {
               disabled={sending}
               className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
             >
-              Без ответа
+              В конец
             </button>
           </div>
 
@@ -564,9 +600,24 @@ async function handleForward() {
                   if (!clientUuid) {
                     throw new Error("Нет client_uuid");
                   }
-                  const selectedInterviewId = localStorage.getItem("selected_interview_id");
-                  const result = await analyzeInterviewAnswers(clientUuid, selectedInterviewId || undefined);
+                  const interviewId = resolvedInterviewId || localStorage.getItem("selected_interview_id") || undefined;
+                  const result = await analyzeInterviewAnswers(clientUuid, interviewId);
                   localStorage.setItem("interview_analysis", JSON.stringify(result));
+                  
+                  // Check if user selected "Пройду оба" and this was the default interview
+                  const selectedCode = localStorage.getItem("selected_interview_code");
+                  if (selectedCode === "default") {
+                    // Check if short interview is already completed or in progress
+                    const shortRes = await fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=short`);
+                    const shortData = await shortRes.json();
+                    if (!shortData.completed && !shortData.in_progress) {
+                      // Redirect to short interview
+                      localStorage.setItem("selected_interview_code", "short");
+                      window.location.href = "/interview";
+                      return;
+                    }
+                  }
+                  
                   window.location.href = `/results?client_uuid=${clientUuid}`;
                 } catch (err) {
                   setError(err instanceof Error ? err.message : "Ошибка анализа");

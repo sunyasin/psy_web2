@@ -17,6 +17,7 @@ export default function AnalysisPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const clientUuid = params.get("client_uuid");
+    const analyzeAll = localStorage.getItem("analyze_all_interviews") === "true";
 
     if (!clientUuid) {
       window.location.href = "/";
@@ -37,11 +38,15 @@ export default function AnalysisPage() {
             console.error("Failed to parse cached analysis:", parseError);
           }
           localStorage.removeItem("interview_analysis");
+          if (analyzeAll) {
+            localStorage.removeItem("analyze_all_interviews");
+          }
           setLoading(false);
           return;
         }
 
-        const res = await fetch(`/api/analysis/ideas?client_uuid=${clientUuid}`);
+        const apiEndpoint = analyzeAll ? "/api/analysis/all-interviews" : "/api/analysis/ideas";
+        const res = await fetch(`${apiEndpoint}?client_uuid=${clientUuid}`);
         if (!res.ok) {
           const data = await res.json();
           throw new Error(data.error || "Не удалось получить идеи");
@@ -50,6 +55,12 @@ export default function AnalysisPage() {
         const ideas = Array.isArray(data.ideas) ? data.ideas : [];
         setIdeas(ideas);
         setAnswerCount(typeof data.answerCount === "number" ? data.answerCount : ideas.length);
+        if (data.analysis_id) {
+          setAnalysisId(data.analysis_id);
+        }
+        if (analyzeAll) {
+          localStorage.removeItem("analyze_all_interviews");
+        }
       } catch (err) {
         console.error("Analysis error:", err);
         setError(err instanceof Error ? err.message : "Ошибка анализа");

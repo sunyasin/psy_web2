@@ -6,6 +6,7 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const clientUuid = searchParams.get("client_uuid");
     const interviewId = searchParams.get("interview_id");
+    const interviewCode = searchParams.get("interview_code");
 
     if (!clientUuid) {
       return NextResponse.json({ error: "client_uuid is required" }, { status: 400 });
@@ -13,7 +14,21 @@ export async function GET(request: Request) {
 
     const supabase = getSupabaseServerClient();
 
-    let query = supabase
+    let resolvedInterviewId = interviewId;
+    if (!resolvedInterviewId && interviewCode) {
+      const { data: interview } = await supabase
+        .from("interview")
+        .select("id")
+        .eq("code", interviewCode)
+        .eq("visible", true)
+        .single();
+      if (interview) {
+        resolvedInterviewId = interview.id;
+      }
+    }
+
+    // Check completed
+    let completedQuery = supabase
       .from("interview_sessions")
       .select("id")
       .eq("client_uuid", clientUuid)
@@ -21,17 +36,35 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: false })
       .limit(1);
 
-    if (interviewId) {
-      query = query.eq("interview_id", interviewId);
+    if (resolvedInterviewId) {
+      completedQuery = completedQuery.eq("interview_id", resolvedInterviewId);
     }
 
-    const { data: session, error } = await query.maybeSingle();
+    const { data: completedSession, error: completedError } = await completedQuery.maybeSingle();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    // Check in_progress
+    let inProgressQuery = supabase
+      .from("interview_sessions")
+      .select("id")
+      .eq("client_uuid", clientUuid)
+      .eq("status", "in_progress")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (resolvedInterviewId) {
+      inProgressQuery = inProgressQuery.eq("interview_id", resolvedInterviewId);
     }
 
-    return NextResponse.json({ completed: !!session });
+    const { data: inProgressSession, error: inProgressError } = await inProgressQuery.maybeSingle();
+
+    if (completedError || inProgressError) {
+      return NextResponse.json({ error: completedError?.message || inProgressError?.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ 
+      completed: !!completedSession,
+      in_progress: !!inProgressSession 
+    });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Invalid request" },

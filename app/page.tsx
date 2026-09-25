@@ -111,9 +111,9 @@ export default function Home() {
                   onClick={() => (window.location.href = "/interview")}
                   className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
                 >
-                  <span className="block text-base font-semibold">Пройти интервью</span>
+                  <span className="block text-base font-semibold">Интервью. Анализ. Цели. Брейншторм</span>
                   <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                    Начать или продолжить интервью — ИИ найдёт твоё призвание
+                    ИИ поможет найти призвание по биографии и предпочтениям личности
                   </span>
                 </button>
               )}
@@ -122,9 +122,9 @@ export default function Home() {
                 onClick={() => (window.location.href = "/problem")}
                 className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
               >
-                <span className="block text-base font-semibold">У меня есть конкретная проблема</span>
+                <span className="block text-base font-semibold">есть вопрос, хочу разобраться в ...</span>
                 <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                  В жизни или в текущем проекте, хочу разобраться и найти решение
+                  В жизненной ситуации или в текущем проекте, хочу пообщаться и найти решение
                 </span>
               </button>
 
@@ -135,6 +135,16 @@ export default function Home() {
                 <span className="block text-base font-semibold">Хочу проверить и наладить области жизни</span>
                 <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
                   Отношения, деньги, здоровье, самореализация и т.д.
+                </span>
+              </button>
+
+              <button
+                onClick={() => (window.location.href = "/interview-select")}
+                className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+              >
+                <span className="block text-base font-semibold">У меня есть своя идея/цель, мне нужна стратегия и тактика её достижения</span>
+                <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Пройди интервью для точного анализа ИИ и получи стратегию достижения
                 </span>
               </button>
 

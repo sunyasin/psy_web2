@@ -220,7 +220,13 @@ export async function POST(request: Request) {
 
         const cleaned = response.replace(/```json\n?|\n?```/g, "").trim();
         const parsed = JSON.parse(cleaned) as Idea[];
-        ideas = Array.isArray(parsed) ? parsed.slice(0, 5) : generateFallbackIdeas(profileText, flatAnswers);
+        const rawIdeas = Array.isArray(parsed) ? parsed.slice(0, 5) : generateFallbackIdeas(profileText, flatAnswers);
+        // Ensure all ideas have tags property
+        ideas = rawIdeas.map((idea: any) => ({
+          title: idea.title || "",
+          description: idea.description || "",
+          tags: Array.isArray(idea.tags) ? idea.tags : [],
+        }));
       } catch (err) {
         console.error("[interview_analyze] Claude call failed, using fallback:", err);
         ideas = generateFallbackIdeas(profileText, flatAnswers);

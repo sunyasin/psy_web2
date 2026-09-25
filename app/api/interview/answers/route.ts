@@ -5,6 +5,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const clientUuid = searchParams.get("client_uuid");
+    const interviewId = searchParams.get("interview_id");
 
     if (!clientUuid) {
       return NextResponse.json({ error: "client_uuid is required" }, { status: 400 });
@@ -12,14 +13,19 @@ export async function GET(request: Request) {
 
     const supabase = getSupabaseServerClient();
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("interview_sessions")
       .select("answers")
       .eq("client_uuid", clientUuid)
       .eq("status", "in_progress")
       .order("created_at", { ascending: false })
-      .limit(1)
-      .single();
+      .limit(1);
+
+    if (interviewId) {
+      query = query.eq("interview_id", interviewId);
+    }
+
+    const { data, error } = await query.single();
 
     if (error || !data) {
       return NextResponse.json({ answers: {} });

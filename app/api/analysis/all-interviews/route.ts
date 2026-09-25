@@ -13,46 +13,97 @@ export async function GET(request: Request) {
 
     const supabase = getSupabaseServerClient();
 
-    const { data: session, error: sessionError } = await supabase
+    // Get all completed interview sessions for this client
+    const { data: sessions, error: sessionsError } = await supabase
       .from("interview_sessions")
       .select("*")
       .eq("client_uuid", clientUuid)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .eq("status", "completed")
+      .order("created_at", { ascending: false });
 
-    if (sessionError || !session) {
+    if (sessionsError || !sessions || sessions.length === 0) {
       return NextResponse.json(
-        { error: "No interview session found. Please answer at least 1 question." },
+        { error: "No completed interview sessions found" },
         { status: 404 }
       );
     }
 
-    const answers = (session.answers as Record<string, Record<string, string>>) || {};
-    const flatAnswers = Object.values(answers)
-      .filter((block) => typeof block === "object" && block !== null && block !== (answers as any).block4_trigger)
-      .flatMap((block) => {
-        if (block === (answers as any).block4_trigger) return [];
-        return Object.values(block as Record<string, string>);
-      });
-    
-    const answerCount = flatAnswers.length;
-    const profileText = flatAnswers.join(" ").toLowerCase();
+    // Combine answers from all completed sessions
+    let allFlatAnswers: string[] = [];
+    let totalAnswerCount = 0;
+    const allRawAnswers: Record<string, Record<string, string>> = {};
 
-    if (!claudeConfigured()) {
-      return NextResponse.json({ ideas: generateFallbackIdeas(profileText, flatAnswers), answerCount });
+    for (const session of sessions) {
+      const answers = (session.answers as Record<string, Record<string, string>>) || {};
+      // Merge answers from all sessions
+      for (const [block, blockAnswers] of Object.entries(answers)) {
+        if (block === "block4_trigger") continue;
+        if (typeof blockAnswers === "object" && blockAnswers !== null) {
+          if (!allRawAnswers[block]) {
+            allRawAnswers[block] = {};
+          }
+          Object.assign(allRawAnswers[block], blockAnswers);
+        }
+      }
+      
+      const flatAnswers = Object.values(answers)
+        .filter((block): block is Record<string, string> => 
+          typeof block === "object" && block !== null && block !== (answers as any).block4_trigger
+        )
+        .flatMap((block) => Object.values(block));
+      
+      allFlatAnswers = allFlatAnswers.concat(flatAnswers);
+      totalAnswerCount += flatAnswers.length;
     }
 
+    if (allFlatAnswers.length === 0) {
+      return NextResponse.json(
+        { error: "No answers found in completed interviews" },
+        { status: 404 }
+      );
+    }
+
+    const profileText = allFlatAnswers.join(" ").toLowerCase();
+
+    if (!claudeConfigured()) {
+      const ideas = generateFallbackIdeas(profileText, allFlatAnswers);
+      // Save analysis to database
+      const { data: analysis, error: insertError } = await supabase
+        .from("interview_analyses")
+        .insert({
+          client_uuid: clientUuid,
+          interview_session_id: sessions[0].id, // Use first session as reference
+          raw_answers: allRawAnswers,
+          ideas,
+          model_used: "fallback",
+          answer_count: totalAnswerCount,
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("[analysis/all-interviews] Failed to save analysis:", insertError);
+      }
+
+      return NextResponse.json({ 
+        ideas, 
+        answerCount: totalAnswerCount,
+        analysis_id: analysis?.id || null
+      });
+    }
+
+    // Use the prompt from the first interview (default)
     const { data: interview } = await supabase
       .from("interview")
       .select("prompt")
-      .eq("id", session.interview_id)
+      .eq("code", "default")
+      .eq("visible", true)
       .single();
 
     const systemPrompt = interview?.prompt || "Ты — карьерный и жизненный стратег. Ты говоришь по-русски. Проанализируй ответы и предложи 5 идей в JSON.";
 
     try {
-      const promptText = flatAnswers.map((text, idx) => `Ответ ${idx + 1}: ${text}`).join("\n");
+      const promptText = allFlatAnswers.map((text, idx) => `Ответ ${idx + 1}: ${text}`).join("\n");
       const response = await callClaude(
         [{ role: "user", text: promptText }],
         systemPrompt,
@@ -61,7 +112,7 @@ export async function GET(request: Request) {
 
       const cleaned = response.replace(/```json\n?|\n?```/g, "").trim();
       const parsed = JSON.parse(cleaned);
-      const rawIdeas = Array.isArray(parsed) ? parsed.slice(0, 5) : generateFallbackIdeas(profileText, flatAnswers);
+      const rawIdeas = Array.isArray(parsed) ? parsed.slice(0, 5) : generateFallbackIdeas(profileText, allFlatAnswers);
       // Ensure all ideas have tags property
       const ideas = rawIdeas.map((idea: any) => ({
         title: idea.title || "",
@@ -69,16 +120,61 @@ export async function GET(request: Request) {
         tags: Array.isArray(idea.tags) ? idea.tags : [],
       }));
 
-      return NextResponse.json({ ideas, answerCount });
+      // Save analysis to database
+      const { data: analysis, error: insertError } = await supabase
+        .from("interview_analyses")
+        .insert({
+          client_uuid: clientUuid,
+          interview_session_id: sessions[0].id, // Use first session as reference
+          raw_answers: allRawAnswers,
+          ideas,
+          model_used: "claude",
+          answer_count: totalAnswerCount,
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("[analysis/all-interviews] Failed to save analysis:", insertError);
+      }
+
+      return NextResponse.json({ 
+        ideas, 
+        answerCount: totalAnswerCount,
+        analysis_id: analysis?.id || null
+      });
     } catch (err) {
-      console.error("[analysis/ideas] Claude call failed, using fallback:", err);
-      const rawIdeas = generateFallbackIdeas(profileText, flatAnswers);
+      console.error("[analysis/all-interviews] Claude call failed, using fallback:", err);
+      const rawIdeas = generateFallbackIdeas(profileText, allFlatAnswers);
       const ideas = rawIdeas.map((idea: any) => ({
         title: idea.title || "",
         description: idea.description || "",
         tags: Array.isArray(idea.tags) ? idea.tags : [],
       }));
-      return NextResponse.json({ ideas, answerCount });
+      
+      // Save fallback analysis to database
+      const { data: analysis, error: insertError } = await supabase
+        .from("interview_analyses")
+        .insert({
+          client_uuid: clientUuid,
+          interview_session_id: sessions[0].id,
+          raw_answers: allRawAnswers,
+          ideas,
+          model_used: "fallback",
+          answer_count: totalAnswerCount,
+        })
+        .select()
+        .single();
+
+      if (insertError) {
+        console.error("[analysis/all-interviews] Failed to save fallback analysis:", insertError);
+      }
+
+      return NextResponse.json({ 
+        ideas, 
+        answerCount: totalAnswerCount,
+        analysis_id: analysis?.id || null
+      });
     }
   } catch (err) {
     return NextResponse.json(
@@ -95,7 +191,7 @@ function generateFallbackIdeas(
   const ideas: { title: string; description: string; tags: string[] }[] = [];
 
   const hasRemote = /удален|удаленк|remote|пассивн|доход/.test(profileText);
-  const hasProgramming = /программир|код|разработ|айб/ .test(profileText);
+  const hasProgramming = /программир|код|разработ|айб/.test(profileText);
   const hasMeditation = /медит|духов|йог|практик|самопознан|философ/.test(profileText);
   const hasBuilding = /строит|дом|экол|каркас|геокупол/.test(profileText);
   const hasSurf = /серфинг|серфи|плаван|водн|океан/.test(profileText);

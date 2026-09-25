@@ -49,17 +49,23 @@ export async function submitAnswer(
   clientUuid: string,
   answer: string,
   blockNumber: number,
-  order: number
+  order: number,
+  interviewId?: string
 ): Promise<InterviewQuestionResult> {
   const supabase = getSupabaseServerClient();
-  const { data: session, error: sessionError } = await supabase
+  let query = supabase
     .from("interview_sessions")
     .select("*")
     .eq("client_uuid", clientUuid)
     .eq("status", "in_progress")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+    .limit(1);
+
+  if (interviewId) {
+    query = query.eq("interview_id", interviewId);
+  }
+
+  const { data: session, error: sessionError } = await query.single();
 
   if (sessionError || !session) {
     throw new Error(sessionError?.message || "No active interview session");
@@ -204,17 +210,23 @@ export async function updateAnswer(
   clientUuid: string,
   blockNumber: number,
   order: number,
-  answer: string
+  answer: string,
+  interviewId?: string
 ): Promise<InterviewQuestionResult> {
   const supabase = getSupabaseServerClient();
-  const { data: session, error: sessionError } = await supabase
+  let query = supabase
     .from("interview_sessions")
     .select("*")
     .eq("client_uuid", clientUuid)
     .eq("status", "in_progress")
     .order("created_at", { ascending: false })
-    .limit(1)
-    .single();
+    .limit(1);
+
+  if (interviewId) {
+    query = query.eq("interview_id", interviewId);
+  }
+
+  const { data: session, error: sessionError } = await query.single();
 
   if (sessionError || !session) {
     throw new Error(sessionError?.message || "No active interview session");
