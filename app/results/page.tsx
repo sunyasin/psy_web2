@@ -169,10 +169,6 @@ export default function ResultsPage() {
 
         const res = await fetch(`/api/results?client_uuid=${clientUuid}&interview_id=${selectedInterviewId}`);
         const data = await res.json();
-        console.log(
-          "[results:diag] loaded",
-          { selectedInterviewId, interviewsCount: interviews.length, count: data.results?.length, error: data.error }
-        );
         setResults(data.results || []);
       } catch (err) {
         console.error("Failed to load results:", err);
@@ -219,18 +215,6 @@ export default function ResultsPage() {
 
   const currentResult = results[0] || null;
   const ideas: Idea[] = currentResult ? extractIdeasFromModelJson(currentResult) : [];
-
-  console.log(
-    "[results:diag] render",
-    {
-      selectedInterviewId,
-      resultId: currentResult?.id,
-      hasModelJson: !!currentResult?.model_json,
-      ideasCount: ideas.length,
-      completedWithoutAnalysis,
-      analysisNeedsRerun,
-    }
-  );
 
   const formatIdeasAsText = (ideasList: Idea[]): string => {
     return ideasList
