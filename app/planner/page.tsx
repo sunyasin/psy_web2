@@ -1,108 +1,118 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { loadPlannerGoals } from "./actions";
+import type { PlannerGoalSummary } from "@/lib/types";
 
-type PlannerStep = {
-  id: string;
-  title: string;
-  description: string | null;
-  status: "planned" | "in_progress" | "finished" | "canceled" | "deleted";
-  notes: string | null;
-  result: string | null;
-  planned_days: number | null;
-  model_comments: string | null;
-  order_index: number;
-};
-
-type PlannerStage = {
-  id: string;
-  goal_id: string;
-  title: string;
-  description: string | null;
-  status: "planned" | "in_progress" | "finished" | "canceled" | "deleted";
-  result: string | null;
-  planned_days: number | null;
-  steps: PlannerStep[];
-};
-
-const statusLabels: Record<string, string> = {
-  planned: "Запланирован",
-  in_progress: "В работе",
-  finished: "Завершён",
-  canceled: "Отменён",
-  deleted: "Удалён",
+const goalStatusLabels: Record<string, string> = {
+  active: "Активная",
+  paused: "Приостановлена",
+  achieved: "Достигнута",
+  abandoned: "Отложена",
 };
 
 export default function PlannerPage() {
-  const [clientUuid] = useState<string | null>(() => typeof window === "undefined" ? null : localStorage.getItem("client_uuid"));
-  const [stages, setStages] = useState<PlannerStage[]>([]);
+  const router = useRouter();
+  const [clientUuid] = useState<string | null>(() =>
+    typeof window === "undefined" ? null : localStorage.getItem("client_uuid")
+  );
+  const [goals, setGoals] = useState<PlannerGoalSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!clientUuid) {
-      queueMicrotask(() => {
-        setError("Сессия не найдена. Вернитесь на главную.");
-        setLoading(false);
-      });
+      router.push("/");
       return;
     }
-    fetch(`/api/short-analysis/plan?client_uuid=${encodeURIComponent(clientUuid)}`)
-      .then(async (response) => {
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Не удалось загрузить планировщик");
-        setStages(payload.stages || []);
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить планировщик"))
-      .finally(() => setLoading(false));
-  }, [clientUuid]);
 
-  if (loading) return <main className="flex min-h-screen items-center justify-center bg-zinc-50 text-sm text-zinc-600 dark:bg-black dark:text-zinc-400">Загружаю планировщик...</main>;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await loadPlannerGoals(clientUuid);
+        if (!cancelled) setGoals(data);
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Ошибка загрузки целей");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientUuid, router]);
 
   return (
-    <div className="min-h-screen bg-zinc-50 px-6 py-10 font-sans dark:bg-black">
-      <main className="mx-auto w-full max-w-4xl space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Планировщик</p>
-            <h1 className="mt-2 text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">Цели, этапы и шаги</h1>
+    <div className="flex flex-col flex-1 items-center bg-zinc-50 font-sans dark:bg-black">
+      <main className="flex w-full max-w-2xl flex-1 flex-col items-center px-6 py-16 dark:bg-black">
+        <div className="w-full space-y-6">
+          <div className="text-center">
+            <h1 className="text-xl font-semibold text-black dark:text-zinc-50">Планировщик моих целей</h1>
+            <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+              {loading
+                ? "Загружаю цели..."
+                : goals.length === 0
+                  ? "Пока нет ни одной цели. Сначала пройди интервью или сформулируй свою идею."
+                  : `Выбери цель, чтобы открыть её этапы и шаги`}
+            </p>
           </div>
-          <button type="button" onClick={() => (window.location.href = "/")} className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-xs font-medium text-black hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white">На главную</button>
-        </div>
-        {error && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{error}</p>}
-        {stages.length === 0 ? (
-          <div className="rounded-xl border border-zinc-200 bg-white p-8 text-center dark:border-zinc-800 dark:bg-zinc-900">
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">В планировщике пока нет этапов.</p>
-            <a href="/short-analysis" className="mt-4 inline-block rounded-md bg-black px-4 py-2 text-sm font-medium text-white dark:bg-white dark:text-black">Перейти к анализу</a>
-          </div>
-        ) : stages.map((stage) => (
-          <section key={stage.id} className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold text-black dark:text-zinc-50">{stage.title}</h2>
-                {stage.description && <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{stage.description}</p>}
-              </div>
-              <span className="rounded-full border border-zinc-200 px-2 py-1 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">{statusLabels[stage.status] || stage.status}</span>
-            </div>
-            <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">План: {stage.planned_days || "—"} дней</p>
-            {stage.result && <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-200">Результат: {stage.result}</p>}
-            <div className="mt-4 space-y-2">
-              {stage.steps.map((step) => (
-                <div key={step.id} className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-zinc-700 dark:text-zinc-200">{step.title}</p>
-                      {step.description && <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{step.description}</p>}
-                    </div>
-                    <span className="shrink-0 text-xs text-zinc-500 dark:text-zinc-400">{statusLabels[step.status] || step.status}</span>
-                  </div>
-                  {step.result && <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-300">Результат: {step.result}</p>}
-                  {step.notes && <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">Заметки: {step.notes}</p>}
+
+          {error && (
+            <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
+              {error}
+            </p>
+          )}
+
+          <div className="space-y-4">
+            {goals.map((goal) => (
+              <button
+                key={goal.id}
+                type="button"
+                onClick={() => router.push(`/planner/goal?id=${encodeURIComponent(goal.id)}`)}
+                className="w-full rounded-xl border border-zinc-200 bg-zinc-50 p-5 text-left transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-white"
+              >
+                <div className="mb-2 flex items-start justify-between gap-3">
+                  <span className="text-sm font-semibold text-black dark:text-zinc-50">{goal.title}</span>
+                  <span className="shrink-0 rounded-full border border-zinc-200 px-2 py-0.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+                    {goalStatusLabels[goal.status || "active"] || goal.status || "Активная"}
+                  </span>
                 </div>
-              ))}
-            </div>
-          </section>
-        ))}
+
+                {goal.description && (
+                  <p className="mb-3 whitespace-pre-wrap text-sm text-zinc-700 dark:text-zinc-300">{goal.description}</p>
+                )}
+
+                {goal.strategy_title && (
+                  <p className="mb-3 text-xs text-zinc-500 dark:text-zinc-400">Стратегия: {goal.strategy_title}</p>
+                )}
+
+                <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+                  <div
+                    className="h-full rounded-full bg-zinc-900 transition-all dark:bg-zinc-100"
+                    style={{ width: `${goal.progress_percent}%` }}
+                  />
+                </div>
+
+                <div className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                  Прогресс: {goal.progress_percent}% · этапов: {goal.stages_count} · шагов:{" "}
+                  {goal.finished_steps_count}/{goal.steps_count}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          <div className="flex justify-center">
+            <button
+              type="button"
+              onClick={() => (window.location.href = "/")}
+              className="rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+            >
+              На главную
+            </button>
+          </div>
+        </div>
       </main>
     </div>
   );

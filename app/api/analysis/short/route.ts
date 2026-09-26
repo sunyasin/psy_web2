@@ -64,6 +64,7 @@ export async function GET(request: Request) {
     const promptText = flatAnswers.map((text, index) => `Ответ ${index + 1}: ${text}`).join("\n");
     let strategies: ShortAnalysisResult[] = [];
     let modelUsed = "fallback";
+    let modelJson: any = null;
 
     if (claudeConfigured()) {
       try {
@@ -72,11 +73,13 @@ export async function GET(request: Request) {
           shortInterview.prompt,
           { max_tokens: 10000, temperature: 0.7 }
         );
+        modelJson = { raw_response: response };
         strategies = normalizeStrategies(JSON.parse(stripCodeFence(response)));
         if (strategies.length > 0) modelUsed = "claude";
       } catch (err) {
         console.error("[analysis/short] Claude call failed, using fallback:", err);
         strategies = [];
+        modelJson = { error: err instanceof Error ? err.message : "Unknown error" };
       }
     }
 
@@ -87,6 +90,7 @@ export async function GET(request: Request) {
       });
       strategies = generateFallbackStrategies(profileText);
       modelUsed = "fallback";
+      modelJson = { strategies, fallback: true };
     }
 
     const { data: analysis, error: analysisError } = await supabase
@@ -97,8 +101,7 @@ export async function GET(request: Request) {
         interview_id: shortInterview.id,
         raw_answers: rawAnswers,
         goal_answer: goalAnswer,
-        ideas: strategies,
-        strategy_json: strategies,
+        model_json: modelJson,
         model_used: modelUsed,
         answer_count: flatAnswers.length,
       })

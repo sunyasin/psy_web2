@@ -20,6 +20,13 @@ function CompletedCheck() {
   );
 }
 
+function formatAnalysisDate(value: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
 export default function InterviewSelectPage() {
   const [clientUuid] = useState<string | null>(() => typeof window === "undefined" ? null : localStorage.getItem("client_uuid"));
   const [displayName] = useState<string | null>(() => typeof window === "undefined" ? null : localStorage.getItem("display_name"));
@@ -31,6 +38,8 @@ export default function InterviewSelectPage() {
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisStage, setAnalysisStage] = useState("Собираем ваши ответы");
+  const [hasAnalysis, setHasAnalysis] = useState(false);
+  const [analysisCreatedAt, setAnalysisCreatedAt] = useState<string | null>(null);
 
   useEffect(() => {
     if (!analyzing) return;
@@ -49,11 +58,14 @@ export default function InterviewSelectPage() {
     Promise.all([
       fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=default`).then((response) => response.json()),
       fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=short`).then((response) => response.json()),
-    ]).then(([fullData, shortData]) => {
+      fetch(`/api/analysis/exists?client_uuid=${clientUuid}`).then((response) => response.json()),
+    ]).then(([fullData, shortData, analysisData]) => {
       setFullCompleted(Boolean(fullData.completed));
       setShortCompleted(Boolean(shortData.completed));
       setFullInProgress(Boolean(fullData.in_progress));
       setShortInProgress(Boolean(shortData.in_progress));
+      setHasAnalysis(Boolean(analysisData.has_analysis));
+      setAnalysisCreatedAt(analysisData.created_at ?? null);
     }).catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить статус интервью"))
       .finally(() => setLoading(false));
   }, [clientUuid]);
@@ -66,6 +78,11 @@ export default function InterviewSelectPage() {
     localStorage.setItem("selected_interview_code", code);
     localStorage.removeItem("selected_interview_id");
     window.location.href = "/interview";
+  }
+
+  function openAnalysisResults() {
+    if (!clientUuid) return;
+    window.location.href = `/short-analysis?client_uuid=${encodeURIComponent(clientUuid)}`;
   }
 
   async function analyze() {
@@ -137,9 +154,22 @@ export default function InterviewSelectPage() {
             </span>
             <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">Точка Б, текущее положение, ресурсы, ограничения {shortCompleted ? "· пройдено" : shortInProgress ? "· в процессе" : ""}</span>
           </button>
-          <button type="button" onClick={analyze} disabled={analyzing || (!fullCompleted && !shortCompleted)} className="w-full rounded-md bg-black px-4 py-4 text-left text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200">
-            <span className="block text-base font-semibold">Анализировать результаты интервью</span>
-            <span className="mt-1 block text-xs text-zinc-300 dark:text-zinc-500">{fullCompleted && shortCompleted ? "Все ответы двух интервью попадут в анализ стратегии" : "Получить стратегии и шаги"}</span>
+          <button
+            type="button"
+            onClick={hasAnalysis ? openAnalysisResults : analyze}
+            disabled={analyzing || (!hasAnalysis && !fullCompleted && !shortCompleted)}
+            className="w-full rounded-md bg-black px-4 py-4 text-left text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+          >
+            <span className="block text-base font-semibold">
+              {hasAnalysis ? "Результаты интервью" : "Анализировать результаты интервью"}
+            </span>
+            <span className="mt-1 block text-xs text-zinc-300 dark:text-zinc-500">
+              {hasAnalysis
+                ? `Стратегии и шаги по твоим ответам${analysisCreatedAt ? ` от ${formatAnalysisDate(analysisCreatedAt)}` : ""}`
+                : fullCompleted && shortCompleted
+                  ? "Все ответы двух интервью попадут в анализ стратегии"
+                  : "Получить стратегии и шаги"}
+            </span>
           </button>
         </div>
         <button type="button" onClick={() => (window.location.href = "/")} disabled={analyzing} className="w-full rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50">На главную</button>

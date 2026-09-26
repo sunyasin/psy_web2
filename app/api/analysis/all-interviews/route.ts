@@ -65,8 +65,9 @@ export async function GET(request: Request) {
 
     const profileText = allFlatAnswers.join(" ").toLowerCase();
 
-    if (!claudeConfigured()) {
+if (!claudeConfigured()) {
       const ideas = generateFallbackIdeas(profileText, allFlatAnswers);
+      const modelJson = { ideas, fallback: true };
       // Save analysis to database
       const { data: analysis, error: insertError } = await supabase
         .from("interview_analyses")
@@ -74,7 +75,7 @@ export async function GET(request: Request) {
           client_uuid: clientUuid,
           interview_session_id: sessions[0].id, // Use first session as reference
           raw_answers: allRawAnswers,
-          ideas,
+          model_json: modelJson,
           model_used: "fallback",
           answer_count: totalAnswerCount,
         })
@@ -85,8 +86,8 @@ export async function GET(request: Request) {
         console.error("[analysis/all-interviews] Failed to save analysis:", insertError);
       }
 
-      return NextResponse.json({ 
-        ideas, 
+      return NextResponse.json({
+        ideas,
         answerCount: totalAnswerCount,
         analysis_id: analysis?.id || null
       });
@@ -110,6 +111,8 @@ export async function GET(request: Request) {
         { temperature: 0.7 }
       );
 
+      const modelJson = { raw_response: response };
+      
       const cleaned = response.replace(/```json\n?|\n?```/g, "").trim();
       const parsed = JSON.parse(cleaned);
       const rawIdeas = Array.isArray(parsed) ? parsed.slice(0, 5) : generateFallbackIdeas(profileText, allFlatAnswers);
@@ -127,7 +130,7 @@ export async function GET(request: Request) {
           client_uuid: clientUuid,
           interview_session_id: sessions[0].id, // Use first session as reference
           raw_answers: allRawAnswers,
-          ideas,
+          model_json: modelJson,
           model_used: "claude",
           answer_count: totalAnswerCount,
         })
@@ -138,8 +141,8 @@ export async function GET(request: Request) {
         console.error("[analysis/all-interviews] Failed to save analysis:", insertError);
       }
 
-      return NextResponse.json({ 
-        ideas, 
+      return NextResponse.json({
+        ideas,
         answerCount: totalAnswerCount,
         analysis_id: analysis?.id || null
       });
@@ -151,6 +154,7 @@ export async function GET(request: Request) {
         description: idea.description || "",
         tags: Array.isArray(idea.tags) ? idea.tags : [],
       }));
+      const modelJson = { ideas, fallback: true, error: err instanceof Error ? err.message : "Unknown error" };
       
       // Save fallback analysis to database
       const { data: analysis, error: insertError } = await supabase
@@ -159,7 +163,7 @@ export async function GET(request: Request) {
           client_uuid: clientUuid,
           interview_session_id: sessions[0].id,
           raw_answers: allRawAnswers,
-          ideas,
+          model_json: modelJson,
           model_used: "fallback",
           answer_count: totalAnswerCount,
         })
@@ -170,8 +174,8 @@ export async function GET(request: Request) {
         console.error("[analysis/all-interviews] Failed to save fallback analysis:", insertError);
       }
 
-      return NextResponse.json({ 
-        ideas, 
+      return NextResponse.json({
+        ideas,
         answerCount: totalAnswerCount,
         analysis_id: analysis?.id || null
       });

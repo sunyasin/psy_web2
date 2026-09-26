@@ -4,6 +4,38 @@ import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { Idea, InterviewAnalysisRow, GoalRow } from "@/lib/types";
 
+function extractIdeasFromModelJson(analysis: InterviewAnalysisRow): Idea[] {
+  const modelJson = analysis.model_json;
+  
+  // If modelJson has raw_response, parse it
+  if (modelJson?.raw_response) {
+    try {
+      const cleaned = modelJson.raw_response.replace(/```json\n?|\n?```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) {
+        return parsed.slice(0, 5).map((idea: any) => ({
+          title: idea.title || "",
+          description: idea.description || "",
+          tags: Array.isArray(idea.tags) ? idea.tags : [],
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to parse model_json raw_response:", err);
+    }
+  }
+  
+  // If modelJson has ideas directly (fallback case)
+  if (Array.isArray(modelJson?.ideas)) {
+    return modelJson.ideas.map((idea: any) => ({
+      title: idea.title || "",
+      description: idea.description || "",
+      tags: Array.isArray(idea.tags) ? idea.tags : [],
+    }));
+  }
+  
+  return [];
+}
+
 export default function ResultsPage() {
   const router = useRouter();
   const [interviews, setInterviews] = useState<{ id: string; name: string }[]>([]);
@@ -26,6 +58,7 @@ export default function ResultsPage() {
   const [sendError, setSendError] = useState<string | null>(null);
   const [sendSuccess, setSendSuccess] = useState(false);
   const [completedWithoutAnalysis, setCompletedWithoutAnalysis] = useState(false);
+  const [analysisNeedsRerun, setAnalysisNeedsRerun] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [subscriptionTier] = useState<string>(() => {
     try {
@@ -38,6 +71,7 @@ export default function ResultsPage() {
   const workedIdeaIndices = useMemo(() => {
     const current = results[0];
     if (!current) return new Set<number>();
+    const ideas = extractIdeasFromModelJson(current);
     const normalize = (s: string) => (s || "").trim().toLowerCase();
     const workedTitles = new Set(
       goals
@@ -49,7 +83,7 @@ export default function ResultsPage() {
         .map((g) => normalize(g.title))
     );
     const indices = new Set<number>();
-    current.ideas.forEach((idea: Idea, idx: number) => {
+    ideas.forEach((idea: Idea, idx: number) => {
       if (workedTitles.has(normalize(idea.title))) {
         indices.add(idx);
       }
@@ -135,6 +169,10 @@ export default function ResultsPage() {
 
         const res = await fetch(`/api/results?client_uuid=${clientUuid}&interview_id=${selectedInterviewId}`);
         const data = await res.json();
+        console.log(
+          "[results:diag] loaded",
+          { selectedInterviewId, interviewsCount: interviews.length, count: data.results?.length, error: data.error }
+        );
         setResults(data.results || []);
       } catch (err) {
         console.error("Failed to load results:", err);
@@ -147,6 +185,7 @@ export default function ResultsPage() {
   useEffect(() => {
     if (!selectedInterviewId) {
       setCompletedWithoutAnalysis(false);
+      setAnalysisNeedsRerun(false);
       return;
     }
 
@@ -162,19 +201,36 @@ export default function ResultsPage() {
           const resultsRes = await fetch(`/api/results?client_uuid=${clientUuid}&interview_id=${selectedInterviewId}`);
           const resultsData = await resultsRes.json();
           const hasAnalysis = resultsData.results && resultsData.results.length > 0;
+          const analysis = hasAnalysis ? resultsData.results[0] : null;
+          const hasValidModelJson = analysis && analysis.model_json;
           setCompletedWithoutAnalysis(!hasAnalysis);
+          setAnalysisNeedsRerun(hasAnalysis && !hasValidModelJson);
         } else {
           setCompletedWithoutAnalysis(false);
+          setAnalysisNeedsRerun(false);
         }
       } catch (err) {
         console.error("Failed to check completed status:", err);
         setCompletedWithoutAnalysis(false);
+        setAnalysisNeedsRerun(false);
       }
     })();
   }, [selectedInterviewId]);
 
   const currentResult = results[0] || null;
-  const ideas: Idea[] = currentResult?.ideas || [];
+  const ideas: Idea[] = currentResult ? extractIdeasFromModelJson(currentResult) : [];
+
+  console.log(
+    "[results:diag] render",
+    {
+      selectedInterviewId,
+      resultId: currentResult?.id,
+      hasModelJson: !!currentResult?.model_json,
+      ideasCount: ideas.length,
+      completedWithoutAnalysis,
+      analysisNeedsRerun,
+    }
+  );
 
   const formatIdeasAsText = (ideasList: Idea[]): string => {
     return ideasList
@@ -466,17 +522,19 @@ export default function ResultsPage() {
                   Тариф: бесплатный пробный период
                 </div>
               )}
-              {completedWithoutAnalysis ? (
+              {completedWithoutAnalysis || analysisNeedsRerun ? (
                 <div className="flex h-full flex-col items-center justify-center text-center">
                   <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-                    Интервью окончено. Теперь у меня есть достаточно информации для анализа
+                    {analysisNeedsRerun
+                      ? "Анализ устарел. Запустите повторный анализ для получения актуальных результатов."
+                      : "Интервью окончено. Теперь у меня есть достаточно информации для анализа"}
                   </p>
                   <button
                     onClick={handleStartAnalysis}
                     disabled={analyzing}
                     className="rounded-md bg-black px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
                   >
-                    {analyzing ? "Анализирую..." : "Начать анализ интервью"}
+                    {analyzing ? "Анализирую..." : analysisNeedsRerun ? "Повторить анализ" : "Начать анализ интервью"}
                   </button>
                 </div>
               ) : ideas.length === 0 ? (

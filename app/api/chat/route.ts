@@ -41,14 +41,38 @@ export async function POST(request: Request) {
 
         const { data: analyses } = await supabase
           .from("interview_analyses")
-          .select("ideas")
+          .select("model_json")
           .eq("interview_session_id", session.id)
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();
 
-        if (analyses?.ideas && Array.isArray(analyses.ideas) && analyses.ideas.length > 0) {
-          const ideaList = analyses.ideas as Array<{ title: string; description: string; tags: string[] }>;
+        const modelJson = analyses?.model_json;
+        let ideaList: Array<{ title: string; description: string; tags: string[] }> = [];
+        
+        if (modelJson?.raw_response) {
+          try {
+            const cleaned = modelJson.raw_response.replace(/```json\n?|\n?```/g, "").trim();
+            const parsed = JSON.parse(cleaned);
+            if (Array.isArray(parsed)) {
+              ideaList = parsed.slice(0, 5).map((idea: any) => ({
+                title: idea.title || "",
+                description: idea.description || "",
+                tags: Array.isArray(idea.tags) ? idea.tags : [],
+              }));
+            }
+          } catch (err) {
+            console.error("Failed to parse model_json raw_response:", err);
+          }
+        } else if (Array.isArray(modelJson?.ideas)) {
+          ideaList = modelJson.ideas.map((idea: any) => ({
+            title: idea.title || "",
+            description: idea.description || "",
+            tags: Array.isArray(idea.tags) ? idea.tags : [],
+          }));
+        }
+
+        if (ideaList.length > 0) {
           const ideasToInclude =
             selected_indices.length > 0
               ? selected_indices

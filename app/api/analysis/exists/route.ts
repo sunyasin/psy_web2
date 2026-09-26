@@ -2,30 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import type { ShortAnalysisResult, ShortAnalysisStrategy, ShortAnalysisStep } from "@/lib/types";
 
-function extractStrategiesFromModelJson(modelJson: any): ShortAnalysisResult[] {
-  if (!modelJson) return [];
-  
-  // If modelJson has raw_response, parse it
-  if (modelJson.raw_response) {
-    try {
-      const response = modelJson.raw_response;
-      const stripped = response.replace(/```json\n?|\n?```/g, "").trim();
-      const parsed = JSON.parse(stripped);
-      return normalizeStrategies(parsed);
-    } catch (err) {
-      console.error("Failed to parse model_json raw_response:", err);
-    }
-  }
-  
-  // If modelJson has strategies directly (fallback case)
-  if (Array.isArray(modelJson.strategies)) {
-    return modelJson.strategies;
-  }
-  
-  return [];
-}
-
-// Copy normalizeStrategies logic from analysis/short/route.ts
+// Copy the normalize logic from short-analysis route
 const STRATEGY_KEYS = ["strategies", "Стратегии", "plan", "план", "steps", "шаги"];
 const STRATEGY_NAME_KEYS = ["name", "title", "название", "имя", "стратегия"];
 const STEP_TITLE_KEYS = ["title", "step", "name", "название", "задача", "шаг", "действие"];
@@ -134,12 +111,10 @@ function normalizeStrategies(value: unknown): ShortAnalysisResult[] {
       if (!strategySource || typeof strategySource !== "object") continue;
 
       if (Array.isArray(strategySource)) {
-        // Check if first item has a "steps" property (format: [{name, steps}, {name, steps}])
         const firstObject = strategySource.find((item) => item && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown> | undefined;
         const hasNamedStrategies = firstObject && "steps" in firstObject && Array.isArray(firstObject.steps);
 
         if (hasNamedStrategies) {
-          // Format: [{name: "strategy1", steps: [...]}, {name: "strategy2", steps: [...]}]
           for (const strat of strategySource) {
             if (!strat || typeof strat !== "object") continue;
             const stratObj = strat as Record<string, unknown>;
@@ -153,7 +128,6 @@ function normalizeStrategies(value: unknown): ShortAnalysisResult[] {
             }
           }
         } else {
-          // Format: direct steps array [{title: "step1"}, {title: "step2"}] or array of step strings
           const steps = readSteps(strategySource);
           if (steps.length > 0) {
             const named = firstObject ? readString(firstObject, STRATEGY_NAME_KEYS) : "";
@@ -166,14 +140,12 @@ function normalizeStrategies(value: unknown): ShortAnalysisResult[] {
         continue;
       }
 
-      // Object form: { "название стратегии": steps }
       for (const [name, stepsSource] of Object.entries(strategySource as Record<string, unknown>)) {
         const steps = readSteps(stepsSource);
         if (steps.length > 0) ideaStrategies.push({ name: name.trim() || `Стратегия ${ideaStrategies.length + 1}`, steps });
       }
     }
 
-    // Model returned an idea without a plan: keep it and derive a plan from the description
     if (ideaStrategies.length === 0 && description) {
       const steps = stepsFromDescription(description);
       if (steps.length > 0) {
@@ -183,7 +155,7 @@ function normalizeStrategies(value: unknown): ShortAnalysisResult[] {
     }
 
     if (ideaStrategies.length === 0) {
-      console.error("[short-analysis] idea dropped: no title/description/strategies", JSON.stringify(idea).slice(0, 300));
+      console.error("[analysis-exists] idea dropped: no title/description/strategies", JSON.stringify(idea).slice(0, 300));
       continue;
     }
 
@@ -191,10 +163,31 @@ function normalizeStrategies(value: unknown): ShortAnalysisResult[] {
   }
 
   if (synthesized > 0) {
-    console.error(`[short-analysis] synthesized plans for ${synthesized} idea(s) from description text`);
+    console.error(`[analysis-exists] synthesized plans for ${synthesized} idea(s) from description text`);
   }
 
   return result.slice(0, 5);
+}
+
+function extractStrategiesFromModelJson(modelJson: any): ShortAnalysisResult[] {
+  if (!modelJson) return [];
+  
+  if (modelJson.raw_response) {
+    try {
+      const response = modelJson.raw_response;
+      const stripped = response.replace(/```json\n?|\n?```/g, "").trim();
+      const parsed = JSON.parse(stripped);
+      return normalizeStrategies(parsed);
+    } catch (err) {
+      console.error("Failed to parse model_json raw_response:", err);
+    }
+  }
+  
+  if (Array.isArray(modelJson.strategies)) {
+    return modelJson.strategies;
+  }
+  
+  return [];
 }
 
 export async function GET(request: Request) {
@@ -205,50 +198,29 @@ export async function GET(request: Request) {
     }
 
     const supabase = getSupabaseServerClient();
-    const { data: analyses, error: analysisError } = await supabase
+    const { data, error } = await supabase
       .from("interview_analyses")
-      .select("*")
+      .select("id, model_json, created_at")
       .eq("client_uuid", clientUuid)
       .order("created_at", { ascending: false })
       .limit(20);
-    if (analysisError) {
-      return NextResponse.json({ error: analysisError.message }, { status: 500 });
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const analysis = (analyses || []).find((item) => item.model_json && (
-      (item.model_json.raw_response && typeof item.model_json.raw_response === "string") ||
-      Array.isArray(item.model_json.strategies)
-    )) || null;
-    
-    if (!analysis) {
-      return NextResponse.json({ analysis: null, ideas: [] });
-    }
+    const analysis =
+      (data || []).find(
+        (item) => {
+          const strategies = extractStrategiesFromModelJson(item.model_json);
+          return Array.isArray(strategies) && strategies.length > 0;
+        }
+      ) || null;
 
-    const strategies = extractStrategiesFromModelJson(analysis.model_json);
-    const ideas = strategies.map((idea, ideaIndex) => ({
-      id: `${analysis.id}:${ideaIndex}`,
-      idea_index: ideaIndex,
-      title: idea.title,
-      description: idea.description,
-      strategies: idea.strategies.map((strategy, strategyIndex) => ({
-        id: `${analysis.id}:${ideaIndex}:${strategyIndex}`,
-        idea_index: ideaIndex,
-        strategy_index: strategyIndex,
-        title: strategy.name,
-        description: "",
-        steps: strategy.steps,
-        is_selected: false,
-        tracking: [],
-      })),
-    }));
-
-    return NextResponse.json({ 
-      analysis: {
-        id: analysis.id,
-        goal_answer: analysis.goal_answer,
-        answer_count: analysis.answer_count,
-      },
-      ideas 
+    return NextResponse.json({
+      has_analysis: Boolean(analysis),
+      analysis_id: analysis?.id ?? null,
+      created_at: analysis?.created_at ?? null,
     });
   } catch (err) {
     return NextResponse.json(

@@ -249,7 +249,7 @@ export default function IdeaPage() {
                       }}
                       className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
                     >
-                      Брейншторм
+                      Брейншторм-чат
                     </button>
 
                     {goal && goal.status !== "trash" && (

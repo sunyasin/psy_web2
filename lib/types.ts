@@ -249,10 +249,9 @@ export interface InterviewAnalysisRow {
   interview_session_id: string;
   source_file?: string | null;
   raw_answers: any;
-  ideas: any;
+  model_json?: any;
   model_used?: string | null;
   answer_count: number;
-  strategy_json?: ShortAnalysisResult[] | null;
   goal_answer?: string | null;
   created_at: string;
   interview_id?: string | null;
@@ -304,6 +303,8 @@ export interface ShortAnalysisResult {
   strategies: ShortAnalysisStrategy[];
 }
 
+export type PlannerStatus = 'planned' | 'in_progress' | 'finished' | 'canceled' | 'deleted';
+
 export interface PlannerStageRow {
   id: string;
   client_uuid: string;
@@ -313,7 +314,7 @@ export interface PlannerStageRow {
   strategy_title: string | null;
   title: string;
   description: string | null;
-  status: 'planned' | 'in_progress' | 'finished' | 'canceled' | 'deleted';
+  status: PlannerStatus;
   planned_days: number | null;
   started_at: string | null;
   finished_at: string | null;
@@ -328,10 +329,9 @@ export interface PlannerStepRow {
   stage_id: string;
   client_uuid: string;
   goal_id: string;
-  strategy_title: string | null;
   title: string;
   description: string | null;
-  status: 'planned' | 'in_progress' | 'finished' | 'canceled' | 'deleted';
+  status: PlannerStatus;
   notes: string | null;
   started_at: string | null;
   finished_at: string | null;
@@ -339,6 +339,25 @@ export interface PlannerStepRow {
   spent_amount: number | null;
   planned_days: number | null;
   model_comments: string | null;
+  progress_percent: number;
   order_index: number;
+}
+
+export interface PlannerStageWithSteps extends PlannerStageRow {
+  steps: PlannerStepRow[];
+}
+
+export interface PlannerGoalSummary {
+  id: string;
+  title: string;
+  status: string | null;
+  description: string | null;
+  strategy_title: string | null;
+  stages_count: number;
+  steps_count: number;
+  finished_steps_count: number;
+  progress_percent: number;
+  idea_index: number | null;
+  updated_at: string | null;
 }
 

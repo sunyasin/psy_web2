@@ -154,7 +154,7 @@ export default function ShortAnalysisPage() {
               <p className="text-xs font-medium uppercase tracking-wide text-zinc-500 dark:text-zinc-400">Моя цель</p>
               <p className="mt-2 text-lg leading-7 text-black dark:text-zinc-50">{data.analysis.goal_answer || "Ответ на первый вопрос не найден"}</p>
             </section>
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">Проанализировано ответов: {data.analysis.answer_count || 0}. Выберите один шаг в стратегии — она станет выбранной для этой идеи.</p>
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">Проанализировано ответов: {data.analysis.answer_count || 0}. Выберите стратегию для этой цели.</p>
             {data.ideas.map((idea) => (
               <section key={idea.id} className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
                 <div>

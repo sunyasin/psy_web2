@@ -64,14 +64,33 @@ export async function loadLastSessionSummary(clientUuid: string): Promise<LastSe
   let ideas: Idea[] = [];
   const { data: analysis } = await supabase
     .from("interview_analyses")
-    .select("ideas")
+    .select("model_json")
     .eq("client_uuid", clientUuid)
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();
 
-  if (analysis?.ideas && Array.isArray(analysis.ideas)) {
-    ideas = analysis.ideas.slice(0, 5);
+  const modelJson = analysis?.model_json;
+  if (modelJson?.raw_response) {
+    try {
+      const cleaned = modelJson.raw_response.replace(/```json\n?|\n?```/g, "").trim();
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) {
+        ideas = parsed.slice(0, 5).map((idea: any) => ({
+          title: idea.title || "",
+          description: idea.description || "",
+          tags: Array.isArray(idea.tags) ? idea.tags : [],
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to parse model_json raw_response:", err);
+    }
+  } else if (Array.isArray(modelJson?.ideas)) {
+    ideas = modelJson.ideas.map((idea: any) => ({
+      title: idea.title || "",
+      description: idea.description || "",
+      tags: Array.isArray(idea.tags) ? idea.tags : [],
+    }));
   }
 
   return {

@@ -74,6 +74,16 @@ export default function Home() {
             </div>
 
             <div className="space-y-3">
+              <button
+                onClick={() => (window.location.href = "/planner")}
+                className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+              >
+                <span className="block text-base font-semibold">Планировщик моих целей</span>
+                <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+                  Этапы и шаги по каждой цели, статусы и прогресс
+                </span>
+              </button>
+
               {hasCompleted ? (
                 <>
                   {/* <button

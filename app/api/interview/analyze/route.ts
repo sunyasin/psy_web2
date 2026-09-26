@@ -198,8 +198,10 @@ export async function POST(request: Request) {
     const promptText = flatAnswers.map((text, idx) => `Ответ ${idx + 1}: ${text}`).join("\n");
 
     let ideas: Idea[];
+    let modelJson: any = null;
     if (!claudeConfigured()) {
       ideas = generateFallbackIdeas(profileText, flatAnswers);
+      modelJson = { ideas, fallback: true };
     } else {
       try {
         const { data: interview } = await supabase
@@ -218,6 +220,8 @@ export async function POST(request: Request) {
           { max_tokens: 10000, temperature: 0.7 }
         );
 
+        modelJson = { raw_response: response };
+        
         const cleaned = response.replace(/```json\n?|\n?```/g, "").trim();
         const parsed = JSON.parse(cleaned) as Idea[];
         const rawIdeas = Array.isArray(parsed) ? parsed.slice(0, 5) : generateFallbackIdeas(profileText, flatAnswers);
@@ -230,6 +234,7 @@ export async function POST(request: Request) {
       } catch (err) {
         console.error("[interview_analyze] Claude call failed, using fallback:", err);
         ideas = generateFallbackIdeas(profileText, flatAnswers);
+        modelJson = { ideas, fallback: true, error: err instanceof Error ? err.message : "Unknown error" };
       }
     }
 
@@ -239,7 +244,7 @@ export async function POST(request: Request) {
         client_uuid,
         interview_session_id: session.id,
         raw_answers: answers,
-        ideas,
+        model_json: modelJson,
         model_used: claudeConfigured() ? "claude" : "fallback",
         answer_count: answerCount,
       })
