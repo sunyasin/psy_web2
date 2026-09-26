@@ -1,6 +1,9 @@
 -- 20260924000001_add_short_interview.sql
 -- Миграция: добавляет короткое интервью в таблицу interview
 
+ALTER TABLE interview
+  ADD COLUMN IF NOT EXISTS visible BOOLEAN DEFAULT true;
+
 INSERT INTO interview (id, code, name, prompt, visible)
 SELECT
   '00000000-0000-0000-0000-000000000002',

@@ -1,0 +1,3 @@
+-- 20260925000001_add_user_ideas_strategies_tracking.sql
+-- Стратегии короткого интервью хранятся в interview_analyses.strategy_json.
+-- Отдельные таблицы стратегий и трекинга шагов больше не используются.

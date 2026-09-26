@@ -252,6 +252,8 @@ export interface InterviewAnalysisRow {
   ideas: any;
   model_used?: string | null;
   answer_count: number;
+  strategy_json?: ShortAnalysisResult[] | null;
+  goal_answer?: string | null;
   created_at: string;
   interview_id?: string | null;
   interview_name?: string | null;
@@ -282,5 +284,61 @@ export interface SelectedIdea {
   title: string;
   description: string;
   tags: string[];
+}
+
+export interface ShortAnalysisStrategy {
+  name: string;
+  steps: ShortAnalysisStep[];
+}
+
+export interface ShortAnalysisStep {
+  step: number;
+  title: string;
+  description: string;
+  estimated_days: number;
+}
+
+export interface ShortAnalysisResult {
+  title: string;
+  description: string;
+  strategies: ShortAnalysisStrategy[];
+}
+
+export interface PlannerStageRow {
+  id: string;
+  client_uuid: string;
+  goal_id: string;
+  analysis_id: string | null;
+  idea_index: number;
+  strategy_title: string | null;
+  title: string;
+  description: string | null;
+  status: 'planned' | 'in_progress' | 'finished' | 'canceled' | 'deleted';
+  planned_days: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  result: string | null;
+  spent_amount: number | null;
+  model_comments: string | null;
+  order_index: number;
+}
+
+export interface PlannerStepRow {
+  id: string;
+  stage_id: string;
+  client_uuid: string;
+  goal_id: string;
+  strategy_title: string | null;
+  title: string;
+  description: string | null;
+  status: 'planned' | 'in_progress' | 'finished' | 'canceled' | 'deleted';
+  notes: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  result: string | null;
+  spent_amount: number | null;
+  planned_days: number | null;
+  model_comments: string | null;
+  order_index: number;
 }
 

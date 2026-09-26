@@ -9,6 +9,9 @@ CREATE TABLE IF NOT EXISTS interview (
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
+ALTER TABLE interview
+  ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_interview_code ON interview(code) WHERE active = true;
 
 -- Seed the default interview that interview_config / interview_sessions reference.

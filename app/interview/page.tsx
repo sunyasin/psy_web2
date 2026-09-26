@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { startInterview, submitAnswer, loadExistingSession, updateAnswer, analyzeInterviewAnswers } from "./actions";
+import { startInterview, restartInterview, submitAnswer, loadExistingSession, updateAnswer, analyzeInterviewAnswers } from "./actions";
 import { supabase } from "@/lib/supabase";
 import type { InterviewQuestionResult, InterviewConfigRow, InterviewQuestion } from "@/lib/types";
 
@@ -15,6 +15,7 @@ export default function InterviewPage() {
   const [allQuestions, setAllQuestions] = useState<InterviewConfigRow[]>([]);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisProgress, setAnalysisProgress] = useState<string>("");
+  const [restarting, setRestarting] = useState(false);
   const [resolvedInterviewId, setResolvedInterviewId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -235,6 +236,28 @@ async function handleForward() {
 
   function goHome() {
     window.location.href = "/";
+  }
+
+  async function handleRestart() {
+    if (restarting) return;
+
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid) {
+      setError("Сессия не найдена. Вернитесь на главную.");
+      return;
+    }
+
+    setRestarting(true);
+    setError(null);
+    try {
+      const next = await restartInterview(clientUuid, resolvedInterviewId || undefined);
+      setAnswer("");
+      setQuestion(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Ошибка перезапуска интервью");
+    } finally {
+      setRestarting(false);
+    }
   }
 
   async function handleToStart() {
@@ -592,43 +615,69 @@ async function handleForward() {
           </div>
 
           {question.completed && (
-            <button
-              onClick={async () => {
-                setAnalyzing(true);
-                try {
-                  const clientUuid = localStorage.getItem("client_uuid");
-                  if (!clientUuid) {
-                    throw new Error("Нет client_uuid");
-                  }
-                  const interviewId = resolvedInterviewId || localStorage.getItem("selected_interview_id") || undefined;
-                  const result = await analyzeInterviewAnswers(clientUuid, interviewId);
-                  localStorage.setItem("interview_analysis", JSON.stringify(result));
-                  
-                  // Check if user selected "Пройду оба" and this was the default interview
-                  const selectedCode = localStorage.getItem("selected_interview_code");
-                  if (selectedCode === "default") {
-                    // Check if short interview is already completed or in progress
-                    const shortRes = await fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=short`);
-                    const shortData = await shortRes.json();
-                    if (!shortData.completed && !shortData.in_progress) {
-                      // Redirect to short interview
-                      localStorage.setItem("selected_interview_code", "short");
-                      window.location.href = "/interview";
+            <div className="space-y-2">
+              <button
+                onClick={async () => {
+                  setAnalyzing(true);
+                  try {
+                    const clientUuid = localStorage.getItem("client_uuid");
+                    if (!clientUuid) {
+                      throw new Error("Нет client_uuid");
+                    }
+                    const interviewId = resolvedInterviewId || localStorage.getItem("selected_interview_id") || undefined;
+                    const selectedCode = localStorage.getItem("selected_interview_code");
+
+                    if (selectedCode === "short") {
+                      const response = await fetch(`/api/analysis/short?client_uuid=${encodeURIComponent(clientUuid)}`);
+                      const payload = await response.json();
+                      if (!response.ok) {
+                        throw new Error(payload.error || "Ошибка анализа стратегии");
+                      }
+                      window.location.href = `/short-analysis?client_uuid=${encodeURIComponent(clientUuid)}`;
                       return;
                     }
+
+                    const result = await analyzeInterviewAnswers(clientUuid, interviewId);
+                    localStorage.setItem("interview_analysis", JSON.stringify(result));
+
+                    if (selectedCode === "default") {
+                      const shortRes = await fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=short`);
+                      const shortData = await shortRes.json();
+                      if (!shortData.completed && !shortData.in_progress) {
+                        localStorage.setItem("selected_interview_code", "short");
+                        window.location.href = "/interview";
+                        return;
+                      }
+                      if (shortData.completed) {
+                        const shortAnalysis = await fetch(`/api/analysis/short?client_uuid=${encodeURIComponent(clientUuid)}`);
+                        const shortPayload = await shortAnalysis.json();
+                        if (!shortAnalysis.ok) {
+                          throw new Error(shortPayload.error || "Ошибка анализа стратегии");
+                        }
+                        window.location.href = `/short-analysis?client_uuid=${encodeURIComponent(clientUuid)}`;
+                        return;
+                      }
+                    }
+
+                    window.location.href = `/results?client_uuid=${clientUuid}`;
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : "Ошибка анализа");
+                    setAnalyzing(false);
                   }
-                  
-                  window.location.href = `/results?client_uuid=${clientUuid}`;
-                } catch (err) {
-                  setError(err instanceof Error ? err.message : "Ошибка анализа");
-                  setAnalyzing(false);
-                }
-              }}
-              disabled={analyzing}
-              className="w-full rounded-md bg-black px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-            >
-              {analyzing ? "Анализирую..." : "Анализировать ответы"}
-            </button>
+                }}
+                disabled={analyzing || restarting}
+                className="w-full rounded-md bg-black px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+              >
+                {analyzing ? "Анализирую..." : "Анализировать ответы"}
+              </button>
+              <button
+                onClick={handleRestart}
+                disabled={analyzing || restarting}
+                className="w-full rounded-md border border-zinc-200 bg-white px-4 py-3 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+              >
+                {restarting ? "Начинаю заново..." : "Пройти заново"}
+              </button>
+            </div>
           )}
         </div>
       </main>

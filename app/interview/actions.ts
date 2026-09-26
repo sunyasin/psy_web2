@@ -20,6 +20,35 @@ export async function startInterview(clientUuid: string, interviewId?: string): 
     resolvedInterviewId = defaultInterview.id;
   }
 
+  // Reuse an existing session (unique on client_uuid + interview_id) instead of resetting it.
+  // Upserting would wipe answers of an already completed interview.
+  const { data: existingSession, error: existingError } = await supabase
+    .from("interview_sessions")
+    .select("*")
+    .eq("client_uuid", clientUuid)
+    .eq("interview_id", resolvedInterviewId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message || "Failed to load interview session");
+  }
+
+  if (existingSession) {
+    const s = existingSession as InterviewSessionRow;
+    if (s.status === "completed") {
+      return {
+        sessionId: s.id,
+        blockNumber: s.current_block || 1,
+        order: 0,
+        text: "Интервью завершено. Далее — синтез профиля.",
+        isLast: true,
+        totalInBlock: 0,
+        completed: true,
+      };
+    }
+    return getNextQuestion(s);
+  }
+
   const sessionPayload: Record<string, unknown> = {
     client_uuid: clientUuid,
     interview_id: resolvedInterviewId,
@@ -43,6 +72,57 @@ export async function startInterview(clientUuid: string, interviewId?: string): 
   }
 
   return getNextQuestion(session as InterviewSessionRow);
+}
+
+export async function restartInterview(clientUuid: string, interviewId?: string): Promise<InterviewQuestionResult> {
+  const supabase = getSupabaseServerClient();
+
+  let resolvedInterviewId = interviewId;
+  if (!resolvedInterviewId) {
+    const { data: defaultInterview, error: defaultError } = await supabase
+      .from("interview")
+      .select("id")
+      .eq("code", "default")
+      .single();
+    if (defaultError || !defaultInterview) {
+      throw new Error(defaultError?.message || "Default interview not found");
+    }
+    resolvedInterviewId = defaultInterview.id;
+  }
+
+  const { data: existing, error: existingError } = await supabase
+    .from("interview_sessions")
+    .select("*")
+    .eq("client_uuid", clientUuid)
+    .eq("interview_id", resolvedInterviewId)
+    .maybeSingle();
+
+  if (existingError) {
+    throw new Error(existingError.message || "Failed to load interview session");
+  }
+
+  if (!existing) {
+    return startInterview(clientUuid, resolvedInterviewId);
+  }
+
+  const { data: restarted, error: restartError } = await supabase
+    .from("interview_sessions")
+    .update({
+      answers: {},
+      current_block: 1,
+      status: "in_progress",
+      block4_triggered: false,
+      block4_trigger_description: null,
+    })
+    .eq("id", (existing as InterviewSessionRow).id)
+    .select("*")
+    .single();
+
+  if (restartError || !restarted) {
+    throw new Error(restartError?.message || "Failed to restart interview");
+  }
+
+  return getNextQuestion(restarted as InterviewSessionRow);
 }
 
 export async function submitAnswer(
