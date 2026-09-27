@@ -9,6 +9,7 @@ import {
   parseModelResponse,
   toDecomposePayload,
 } from "./parser";
+import type { DecomposeIdea, PlannedIdeaInfo } from "./parser";
 
 /**
  * Декомпозиция одной цели со страницы идеи.
@@ -63,7 +64,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: analysisError.message }, { status: 500 });
     }
 
-    return NextResponse.json(toDecomposePayload(analysis));
+    const payload = toDecomposePayload(analysis);
+    payload.plannedIdeas = await loadPlannedIdeas(supabase, clientUuid, payload.ideas);
+    return NextResponse.json(payload);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Invalid request" },
@@ -242,16 +245,17 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json(
-      toDecomposePayload({
-        id: analysis.id,
-        client_uuid: clientUuid,
-        goal_answer: goal.title,
-        model_json: modelJson,
-        answer_count: promptLines.length,
-        created_at: new Date().toISOString(),
-      })
-    );
+    // Список созданных ранее целей: UI предупреждает о перезаписи, только если этапы есть.
+    const payload = toDecomposePayload({
+      id: analysis.id,
+      client_uuid: clientUuid,
+      goal_answer: goal.title,
+      model_json: modelJson,
+      answer_count: promptLines.length,
+      created_at: new Date().toISOString(),
+    });
+    payload.plannedIdeas = await loadPlannedIdeas(supabase, clientUuid, payload.ideas);
+    return NextResponse.json(payload);
   } catch (err) {
     console.error("[analysis/decompose] Unhandled error:", err);
     return NextResponse.json(
@@ -259,6 +263,54 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+}
+
+/**
+ * Какие из идей декомпозиции уже разложены в планировщик и сколько у них этапов.
+ *
+ * Ищем цели по названию, а не по source_analysis_id: /plan переиспользует цель и по
+ * названию, когда вставка натыкается на UNIQUE (client_uuid, title). Поэтому совпадение
+ * по названию — это ровно тот случай, когда этапы будут перезаписаны.
+ */
+async function loadPlannedIdeas(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  clientUuid: string,
+  ideas: DecomposeIdea[]
+): Promise<PlannedIdeaInfo[]> {
+  const titles = ideas.map((idea) => idea.title).filter(Boolean);
+  if (titles.length === 0) return [];
+
+  const { data: goals, error: goalsError } = await supabase
+    .from("goals")
+    .select("id, title")
+    .eq("client_uuid", clientUuid)
+    .in("title", titles);
+
+  if (goalsError || !goals || goals.length === 0) {
+    if (goalsError) console.error("[analysis/decompose] loadPlannedIdeas goals:", goalsError);
+    return [];
+  }
+
+  const goalIds = goals.map((row) => row.id as string);
+  const { data: stages, error: stagesError } = await supabase
+    .from("planner_stages")
+    .select("goal_id")
+    .in("goal_id", goalIds);
+
+  if (stagesError) {
+    console.error("[analysis/decompose] loadPlannedIdeas stages:", stagesError);
+    return [];
+  }
+
+  const counts = new Map<string, number>();
+  for (const stage of stages || []) {
+    const stageGoalId = stage.goal_id as string;
+    counts.set(stageGoalId, (counts.get(stageGoalId) || 0) + 1);
+  }
+
+  return goals
+    .map((row) => ({ title: String(row.title), stageCount: counts.get(row.id as string) || 0 }))
+    .filter((info) => info.stageCount > 0);
 }
 
 function buildGoalContext(goal: Record<string, unknown>): string {

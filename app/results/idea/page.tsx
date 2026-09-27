@@ -30,7 +30,12 @@ type DecomposeIdea = {
 type DecomposePayload = {
   analysis: { id: string; goal_answer: string | null; answer_count: number } | null;
   ideas: DecomposeIdea[];
+  plannedIdeas: PlannedIdeaInfo[];
 };
+
+type PlannedIdeaInfo = { title: string; stageCount: number };
+
+type PlanSelection = { idea_index: number; strategy_index: number };
 
 type PlannedGoal = { id: string; title: string; stepCount: number };
 
@@ -66,6 +71,8 @@ export default function IdeaPage() {
   const [selected, setSelected] = useState<Record<number, number>>({});
   const [planLoading, setPlanLoading] = useState(false);
   const [plannedGoals, setPlannedGoals] = useState<PlannedGoal[] | null>(null);
+  const [plannedIdeas, setPlannedIdeas] = useState<PlannedIdeaInfo[]>([]);
+  const [pendingSelections, setPendingSelections] = useState<PlanSelection[] | null>(null);
 
   useEffect(() => {
     const clientUuid = localStorage.getItem("client_uuid");
@@ -112,6 +119,7 @@ export default function IdeaPage() {
         const payload = (await res.json()) as DecomposePayload;
         setDecomposeAnalysisId(payload.analysis?.id ?? null);
         setDecomposeIdeas(Array.isArray(payload.ideas) ? payload.ideas : []);
+        setPlannedIdeas(Array.isArray(payload.plannedIdeas) ? payload.plannedIdeas : []);
         setPlannedGoals(null);
       } catch (err) {
         console.error("Failed to load decomposition:", err);
@@ -223,6 +231,7 @@ export default function IdeaPage() {
       const payload = data as DecomposePayload;
       setDecomposeAnalysisId(payload.analysis?.id ?? null);
       setDecomposeIdeas(Array.isArray(payload.ideas) ? payload.ideas : []);
+      setPlannedIdeas(Array.isArray(payload.plannedIdeas) ? payload.plannedIdeas : []);
       setSelected({});
     } catch (err) {
       setDecomposeError(err instanceof Error ? err.message : "Ошибка соединения");
@@ -239,11 +248,33 @@ export default function IdeaPage() {
     const clientUuid = localStorage.getItem("client_uuid");
     if (!clientUuid || !decomposeAnalysisId) return;
 
-    const selections = Object.entries(selected).map(([ideaIndex, strategyIndex]) => ({
+    const selections: PlanSelection[] = Object.entries(selected).map(([ideaIndex, strategyIndex]) => ({
       idea_index: Number(ideaIndex),
       strategy_index: strategyIndex,
     }));
     if (selections.length === 0) return;
+
+    // Предупреждаем только когда этапы действительно есть и будут перезаписаны.
+    const withStages = new Set(plannedIdeas.filter((item) => item.stageCount > 0).map((item) => item.title));
+    const risky = selections.filter((item) => withStages.has(decomposeIdeas[item.idea_index]?.title));
+
+    if (risky.length > 0) {
+      setPendingSelections(selections);
+      return;
+    }
+
+    await submitPlan(selections);
+  };
+
+  const confirmOverwrite = async () => {
+    const selections = pendingSelections;
+    setPendingSelections(null);
+    if (selections) await submitPlan(selections);
+  };
+
+  const submitPlan = async (selections: PlanSelection[]) => {
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid || !decomposeAnalysisId) return;
 
     setPlanLoading(true);
     setDecomposeError(null);
@@ -265,6 +296,8 @@ export default function IdeaPage() {
       }
 
       setPlannedGoals(Array.isArray(data.goals) ? data.goals : []);
+      setPlannedIdeas([]);
+      await reloadPlannedIdeas();
     } catch (err) {
       setDecomposeError(err instanceof Error ? err.message : "Ошибка соединения");
     } finally {
@@ -297,6 +330,24 @@ export default function IdeaPage() {
 
   const handleBookingCancel = () => {
     setShowBookingPopup(false);
+  };
+
+  const isIdeaPlanned = (item: DecomposeIdea) =>
+    plannedIdeas.some((planned) => planned.title === item.title);
+
+  const reloadPlannedIdeas = async () => {
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid || !goalId) return;
+    try {
+      const res = await fetch(
+        `/api/analysis/decompose?client_uuid=${encodeURIComponent(clientUuid)}&goal_id=${encodeURIComponent(goalId)}`
+      );
+      if (!res.ok) return;
+      const payload = (await res.json()) as DecomposePayload;
+      setPlannedIdeas(Array.isArray(payload.plannedIdeas) ? payload.plannedIdeas : []);
+    } catch (err) {
+      console.error("Failed to reload planned ideas:", err);
+    }
   };
 
   const ideaDescription = idea?.description || "";
@@ -479,81 +530,99 @@ export default function IdeaPage() {
                   {decomposeIdeas.length > 0 && !decomposeLoading && (
                     <div className="space-y-4">
                       <div className="space-y-3">
-                        {decomposeIdeas.map((item) => (
-                          <div
-                            key={item.id}
-                            className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900"
-                          >
-                            <h3 className="text-sm font-semibold text-black dark:text-zinc-50">
-                              {item.title}
-                            </h3>
-                            {item.description && (
-                              <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-                                {item.description}
-                              </p>
-                            )}
-                            <div className="mt-4 grid gap-3 md:grid-cols-2">
-                              {item.strategies.map((strategy) => {
-                                const isSelected = selected[item.idea_index] === strategy.strategy_index;
+{decomposeIdeas.map((item) => {
+                                const planned = isIdeaPlanned(item);
                                 return (
-                                  <button
-                                    key={strategy.id}
-                                    type="button"
-                                    onClick={() =>
-                                      handleSelectStrategy(item.idea_index, strategy.strategy_index)
-                                    }
-                                    className={`rounded-xl border-2 p-4 text-left transition-colors hover:border-zinc-500 ${
-                                      isSelected
-                                        ? "border-black dark:border-white"
-                                        : "border-zinc-200 dark:border-zinc-700"
+                                  <div
+                                    key={item.id}
+                                    className={`rounded-xl border-2 p-4 transition-colors ${
+                                      planned
+                                        ? "border-green-500 bg-green-50 dark:border-green-400 dark:bg-green-950/40"
+                                        : "border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900"
                                     }`}
                                   >
                                     <div className="flex items-start justify-between gap-2">
-                                      <h4 className="text-sm font-medium text-black dark:text-zinc-50">
-                                        {strategy.title}
-                                      </h4>
-                                      {isSelected && (
-                                        <span className="shrink-0 rounded-full bg-black px-2 py-0.5 text-[10px] font-medium text-white dark:bg-white dark:text-black">
-                                          Выбрана
+                                      <h3 className="text-sm font-semibold text-black dark:text-zinc-50">
+                                        {item.title}
+                                      </h3>
+                                      {planned && (
+                                        <span className="shrink-0 rounded-full bg-green-500 px-2 py-0.5 text-[10px] font-medium text-white dark:bg-green-400">
+                                          В плане
                                         </span>
                                       )}
                                     </div>
-                                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                                      Шагов: {strategy.steps.length}
-                                    </p>
-                                    <div className="mt-3 space-y-2">
-                                      {strategy.steps.map((step, stepIndex) => (
-                                        <div
-                                          key={`${strategy.id}-${stepIndex}`}
-                                          className="flex items-start gap-2 rounded-lg border border-zinc-200 p-2 dark:border-zinc-700"
-                                        >
-                                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
-                                            {stepIndex + 1}
-                                          </span>
-                                          <span className="min-w-0 flex-1">
-                                            <span className="block text-sm text-zinc-700 dark:text-zinc-200">
-                                              {step.title}
-                                            </span>
-                                            {step.description && (
-                                              <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
-                                                {step.description}
-                                              </span>
-                                            )}
-                                            {step.estimated_days > 0 && (
-                                              <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
-                                                Срок: {step.estimated_days} дн.
-                                              </span>
-                                            )}
-                                          </span>
-                                        </div>
-                                      ))}
+                                    {item.description && (
+                                      <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                                        {item.description}
+                                      </p>
+                                    )}
+                                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+                                      {item.strategies.map((strategy) => {
+                                        const isSelected = selected[item.idea_index] === strategy.strategy_index;
+                                        return (
+                                          <button
+                                            key={strategy.id}
+                                            type="button"
+                                            onClick={() =>
+                                              handleSelectStrategy(item.idea_index, strategy.strategy_index)
+                                            }
+                                            className={`rounded-xl border-2 p-4 text-left transition-colors hover:border-zinc-500 ${
+                                              isSelected
+                                                ? "border-black dark:border-white"
+                                                : "border-zinc-200 dark:border-zinc-700"
+                                            }`}
+                                          >
+                                            <div className="flex items-start justify-between gap-2">
+                                              <h4 className="text-sm font-medium text-black dark:text-zinc-50">
+                                                {strategy.title}
+                                              </h4>
+                                              {isSelected && (
+                                                <span className="shrink-0 rounded-full bg-black px-2 py-0.5 text-[10px] font-medium text-white dark:bg-white dark:text-black">
+                                                  Выбрана
+                                                </span>
+                                              )}
+                                            </div>
+                                            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                                              Шагов: {strategy.steps.length}
+                                            </p>
+                                            <div className="mt-3 space-y-2">
+                                              {strategy.steps.map((step, stepIndex) => (
+                                                <div
+                                                  key={`${strategy.id}-${stepIndex}`}
+                                                  className={`flex items-start gap-2 rounded-lg border-2 p-2 transition-colors ${
+                                                    planned
+                                                      ? "border-green-500 bg-green-50 dark:border-green-400 dark:bg-green-950/40"
+                                                      : "border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
+                                                  }`}
+                                                >
+                                                  <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
+                                                    {stepIndex + 1}
+                                                  </span>
+                                                  <span className="min-w-0 flex-1">
+                                                    <span className="block text-sm text-zinc-700 dark:text-zinc-200">
+                                                      {step.title}
+                                                    </span>
+                                                    {step.description && (
+                                                      <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                                                        {step.description}
+                                                      </span>
+                                                    )}
+                                                    {step.estimated_days > 0 && (
+                                                      <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                                                        Срок: {step.estimated_days} дн.
+                                                      </span>
+                                                    )}
+                                                  </span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </button>
+                                        );
+                                      })}
                                     </div>
-                                  </button>
+                                  </div>
                                 );
                               })}
-                            </div>
-                          </div>
-                        ))}
                       </div>
 
                       <div className="sticky bottom-4 rounded-xl border border-zinc-200 bg-white/95 p-4 shadow-lg backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
@@ -633,6 +702,47 @@ export default function IdeaPage() {
             </div>
           </section>
         </div>
+
+        {pendingSelections && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-xl border border-zinc-200 bg-white p-6 shadow-xl dark:border-zinc-800 dark:bg-zinc-900">
+              <h3 className="mb-2 text-lg font-semibold text-black dark:text-zinc-50">
+                Перезаписать план?
+              </h3>
+              <p className="mb-4 text-sm text-zinc-600 dark:text-zinc-400">
+                Эти идеи уже разложены в планировщик. Повторная раскладка полностью удалит их этапы и шаги
+                вместе с отметками о выполнении:
+              </p>
+              <ul className="mb-4 space-y-1">
+                {pendingSelections.map((item) => {
+                  const idea = decomposeIdeas[item.idea_index];
+                  if (!idea) return null;
+                  return (
+                    <li key={`${item.idea_index}-${item.strategy_index}`} className="text-sm text-zinc-700 dark:text-zinc-200">
+                      — {idea.title}
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setPendingSelections(null)}
+                  className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+                  disabled={planLoading}
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={confirmOverwrite}
+                  className="flex-1 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={planLoading}
+                >
+                  {planLoading ? "Перезаписываю..." : "ОК, перезаписать"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {showDeleteConfirm && goal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">

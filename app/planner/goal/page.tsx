@@ -1,8 +1,9 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { loadPlannerStages, updatePlannerStep } from "../actions";
+import { computeProgress } from "@/lib/plannerProgress";
 import type { PlannerStageWithSteps, PlannerStatus, PlannerStepRow } from "@/lib/types";
 
 const statusLabels: Record<PlannerStatus, string> = {
@@ -13,7 +14,7 @@ const statusLabels: Record<PlannerStatus, string> = {
   deleted: "Удалён",
 };
 
-const editableStatuses: PlannerStatus[] = ["planned", "in_progress"];
+const editableStatuses: PlannerStatus[] = ["planned", "in_progress", "finished"];
 
 const statusBadgeClasses: Record<PlannerStatus, string> = {
   planned: "border-zinc-200 text-zinc-600 dark:border-zinc-700 dark:text-zinc-300",
@@ -41,7 +42,7 @@ function PlannerGoalContent() {
 
   const [activeStep, setActiveStep] = useState<PlannerStepRow | null>(null);
   const [draftStatus, setDraftStatus] = useState<PlannerStatus>("planned");
-  const [draftDescription, setDraftDescription] = useState("");
+  const [draftNotes, setDraftNotes] = useState("");
   const [draftProgress, setDraftProgress] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -84,9 +85,23 @@ function PlannerGoalContent() {
   const openStep = (step: PlannerStepRow) => {
     setActiveStep(step);
     setDraftStatus(step.status);
-    setDraftDescription(step.description || "");
+    setDraftNotes(step.notes || "");
     setDraftProgress(step.progress_percent ?? 0);
     setSaveError(null);
+  };
+
+  const handleStatusChange = (status: PlannerStatus) => {
+    setDraftStatus(status);
+    if (status === "finished") {
+      setDraftProgress(100);
+    }
+  };
+
+  const handleProgressChange = (value: number) => {
+    setDraftProgress(value);
+    if (draftStatus === "planned" && value > 0) {
+      setDraftStatus("in_progress");
+    }
   };
 
   const saveStep = async () => {
@@ -96,7 +111,7 @@ function PlannerGoalContent() {
     try {
       const updated = await updatePlannerStep(clientUuid, activeStep.id, {
         status: draftStatus,
-        description: draftDescription,
+        notes: draftNotes,
         progress_percent: draftProgress,
       });
       setStages((prev) =>
@@ -115,6 +130,15 @@ function PlannerGoalContent() {
 
   const displayError = error ?? (clientUuid && !goalId ? "Цель не указана" : null);
   const isLoading = loading && Boolean(clientUuid) && Boolean(goalId);
+
+  // Общий прогресс цели — среднее по всем шагам всех этапов, тем же правилом,
+  // что и в списке целей. Пересчитывается сразу после сохранения шага.
+  const allSteps = useMemo(() => stages.flatMap((stage) => stage.steps), [stages]);
+  const goalProgress = useMemo(() => computeProgress(allSteps), [allSteps]);
+  const finishedStepsCount = useMemo(
+    () => allSteps.filter((step) => step.status === "finished").length,
+    [allSteps]
+  );
 
   if (isLoading) {
     return (
@@ -163,6 +187,28 @@ function PlannerGoalContent() {
               Перейти к анализу
             </a>
           </div>
+        )}
+
+        {!displayError && allSteps.length > 0 && (
+          <section className="rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="flex items-baseline justify-between gap-4">
+              <h2 className="text-sm font-semibold text-black dark:text-zinc-50">Общий прогресс по цели</h2>
+              <span className="text-2xl font-semibold tabular-nums text-black dark:text-zinc-50">
+                {goalProgress}%
+              </span>
+            </div>
+
+            <div className="mt-3 h-2.5 w-full overflow-hidden rounded-full bg-zinc-200 dark:bg-zinc-800">
+              <div
+                className="h-full rounded-full bg-zinc-900 transition-[width] dark:bg-zinc-100"
+                style={{ width: `${goalProgress}%` }}
+              />
+            </div>
+
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              Завершено шагов: {finishedStepsCount} из {allSteps.length} · Этапов: {stages.length}
+            </p>
+          </section>
         )}
 
         {stages.map((stage) => (
@@ -286,7 +332,7 @@ function PlannerGoalContent() {
                   <select
                     id="step-status"
                     value={draftStatus}
-                    onChange={(event) => setDraftStatus(event.target.value as PlannerStatus)}
+                    onChange={(event) => handleStatusChange(event.target.value as PlannerStatus)}
                     className="w-full rounded-lg border-2 border-zinc-200 bg-white px-3 py-2 text-sm text-black focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
                   >
                     {editableStatuses.map((status) => (
@@ -297,19 +343,25 @@ function PlannerGoalContent() {
                   </select>
                 </div>
 
+                {activeStep.description && (
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    {activeStep.description}
+                  </p>
+                )}
+
                 <div className="space-y-1.5">
                   <label
-                    htmlFor="step-description"
+                    htmlFor="step-notes"
                     className="block text-xs font-medium text-zinc-600 dark:text-zinc-400"
                   >
-                    Описание
+                    Заметки
                   </label>
                   <textarea
-                    id="step-description"
-                    value={draftDescription}
-                    onChange={(event) => setDraftDescription(event.target.value)}
-                    rows={5}
-                    placeholder="Что именно ты делаешь на этом шаге"
+                    id="step-notes"
+                    value={draftNotes}
+                    onChange={(event) => setDraftNotes(event.target.value)}
+                    rows={4}
+                    placeholder="Твои заметки по шагу"
                     className="w-full rounded-lg border-2 border-zinc-200 bg-white px-3 py-2 text-sm text-black focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-50"
                   />
                 </div>
@@ -329,7 +381,7 @@ function PlannerGoalContent() {
                     max={100}
                     step={5}
                     value={draftProgress}
-                    onChange={(event) => setDraftProgress(Number(event.target.value))}
+                    onChange={(event) => handleProgressChange(Number(event.target.value))}
                     className="w-full accent-zinc-900 dark:accent-zinc-100"
                   />
                 </div>

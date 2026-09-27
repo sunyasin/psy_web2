@@ -34,9 +34,17 @@ export type DecomposeAnalysis = {
   created_at: string;
 };
 
+/** Идея декомпозиции, для которой в планировщике уже есть этапы. */
+export type PlannedIdeaInfo = {
+  title: string;
+  stageCount: number;
+};
+
 export type DecomposePayload = {
   analysis: DecomposeAnalysis | null;
   ideas: DecomposeIdea[];
+  /** Заполняется только когда analysis != null. */
+  plannedIdeas: PlannedIdeaInfo[];
 };
 
 const STRATEGY_KEYS = ["strategies", "Стратегии", "plan", "план", "steps", "шаги"];
@@ -226,8 +234,11 @@ export function extractStrategiesFromModelJson(modelJson: unknown): ShortAnalysi
   return [];
 }
 
-export function toDecomposePayload(analysis: Record<string, unknown> | null): DecomposePayload {
-  if (!analysis) return { analysis: null, ideas: [] };
+export function toDecomposePayload(
+  analysis: Record<string, unknown> | null,
+  plannedIdeas: PlannedIdeaInfo[] = []
+): DecomposePayload {
+  if (!analysis) return { analysis: null, ideas: [], plannedIdeas: [] };
 
   const id = String(analysis.id);
   const ideas = extractStrategiesFromModelJson(analysis.model_json).map((idea, ideaIndex) => ({
@@ -252,6 +263,7 @@ export function toDecomposePayload(analysis: Record<string, unknown> | null): De
       created_at: String(analysis.created_at || ""),
     },
     ideas,
+    plannedIdeas,
   };
 }
 

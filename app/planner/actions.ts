@@ -1,6 +1,7 @@
 "use server";
 
 import { getSupabaseServerClient } from "@/lib/supabase";
+import { computeProgress } from "@/lib/plannerProgress";
 import type {
   GoalRow,
   PlannerGoalSummary,
@@ -10,7 +11,7 @@ import type {
   PlannerStepRow,
 } from "@/lib/types";
 
-const EDITABLE_STEP_STATUSES: PlannerStatus[] = ["planned", "in_progress"];
+const EDITABLE_STEP_STATUSES: PlannerStatus[] = ["planned", "in_progress", "finished"];
 
 const STATUS_LABELS: Record<PlannerStatus, string> = {
   planned: "Запланирован",
@@ -198,7 +199,7 @@ export async function updatePlannerStep(
   stepId: string,
   input: {
     status: PlannerStatus;
-    description: string;
+    notes: string;
     progress_percent: number;
   }
 ): Promise<PlannerStepRow> {
@@ -209,6 +210,8 @@ export async function updatePlannerStep(
   }
 
   const progress = Math.min(100, Math.max(0, Math.round(Number(input.progress_percent) || 0)));
+  const finalStatus = input.status;
+  const finalProgress = finalStatus === "finished" ? 100 : progress;
 
   const { data: existing, error: existingError } = await supabase
     .from("planner_steps")
@@ -232,10 +235,10 @@ export async function updatePlannerStep(
   const { data: updated, error: updateError } = await supabase
     .from("planner_steps")
     .update({
-      status: input.status,
-      description: input.description.trim(),
-      progress_percent: progress,
-      started_at: current.started_at ?? (input.status === "in_progress" ? new Date().toISOString() : null),
+      status: finalStatus,
+      notes: input.notes.trim(),
+      progress_percent: finalProgress,
+      started_at: current.started_at ?? (finalStatus === "in_progress" ? new Date().toISOString() : null),
       updated_at: new Date().toISOString(),
     })
     .eq("id", stepId)
@@ -248,13 +251,4 @@ export async function updatePlannerStep(
   }
 
   return updated as unknown as PlannerStepRow;
-}
-
-function computeProgress(steps: Array<{ status: PlannerStatus; progress_percent: number | null }>): number {
-  if (steps.length === 0) return 0;
-  const total = steps.reduce(
-    (sum, step) => sum + (step.status === "finished" ? 100 : Math.min(100, Math.max(0, step.progress_percent ?? 0))),
-    0
-  );
-  return Math.round(total / steps.length);
 }
