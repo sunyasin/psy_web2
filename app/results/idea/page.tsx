@@ -4,6 +4,36 @@ import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import type { Idea, GoalRow } from "@/lib/types";
 
+type DecomposeStep = {
+  step: number;
+  title: string;
+  description: string;
+  estimated_days: number;
+};
+
+type DecomposeStrategy = {
+  id: string;
+  idea_index: number;
+  strategy_index: number;
+  title: string;
+  steps: DecomposeStep[];
+};
+
+type DecomposeIdea = {
+  id: string;
+  idea_index: number;
+  title: string;
+  description: string | null;
+  strategies: DecomposeStrategy[];
+};
+
+type DecomposePayload = {
+  analysis: { id: string; goal_answer: string | null; answer_count: number } | null;
+  ideas: DecomposeIdea[];
+};
+
+type PlannedGoal = { id: string; title: string; stepCount: number };
+
 function getSubscriptionTier(): string {
   const is_paid = "nopaid"; //paid
   try {
@@ -28,6 +58,14 @@ export default function IdeaPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [showBookingPopup, setShowBookingPopup] = useState(false);
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [hasDefaultInterview, setHasDefaultInterview] = useState(false);
+  const [decomposeLoading, setDecomposeLoading] = useState(false);
+  const [decomposeIdeas, setDecomposeIdeas] = useState<DecomposeIdea[]>([]);
+  const [decomposeAnalysisId, setDecomposeAnalysisId] = useState<string | null>(null);
+  const [decomposeError, setDecomposeError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Record<number, number>>({});
+  const [planLoading, setPlanLoading] = useState(false);
+  const [plannedGoals, setPlannedGoals] = useState<PlannedGoal[] | null>(null);
 
   useEffect(() => {
     const clientUuid = localStorage.getItem("client_uuid");
@@ -47,6 +85,7 @@ export default function IdeaPage() {
         if (res.ok && data.goal) {
           const match = data.goal as GoalRow;
           setGoal(match);
+          setHasDefaultInterview(Boolean(match.has_default_interview));
           const smart = match.smart_json || {};
           setIdea({
             title: match.title,
@@ -61,6 +100,21 @@ export default function IdeaPage() {
         console.error("Failed to load goal:", err);
       } finally {
         setGoalsLoading(false);
+      }
+    })();
+
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/analysis/decompose?client_uuid=${encodeURIComponent(clientUuid)}&goal_id=${encodeURIComponent(goalId)}`
+        );
+        if (!res.ok) return;
+        const payload = (await res.json()) as DecomposePayload;
+        setDecomposeAnalysisId(payload.analysis?.id ?? null);
+        setDecomposeIdeas(Array.isArray(payload.ideas) ? payload.ideas : []);
+        setPlannedGoals(null);
+      } catch (err) {
+        console.error("Failed to load decomposition:", err);
       }
     })();
   }, [goalId, router]);
@@ -142,6 +196,80 @@ export default function IdeaPage() {
     }
     if (!goal) return;
     router.push(`/problem?goal_id=${encodeURIComponent(goal.id)}`);
+  };
+
+  // Подписка пока считается оплаченной на сервере, поэтому handleWithSubscription
+  // здесь намеренно не используется.
+  const handleDecompose = async () => {
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid || !goal) return;
+
+    setDecomposeLoading(true);
+    setDecomposeError(null);
+    setPlannedGoals(null);
+
+    try {
+      const res = await fetch("/api/analysis/decompose", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_uuid: clientUuid, goal_id: goal.id }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Ошибка декомпозиции");
+      }
+
+      const payload = data as DecomposePayload;
+      setDecomposeAnalysisId(payload.analysis?.id ?? null);
+      setDecomposeIdeas(Array.isArray(payload.ideas) ? payload.ideas : []);
+      setSelected({});
+    } catch (err) {
+      setDecomposeError(err instanceof Error ? err.message : "Ошибка соединения");
+    } finally {
+      setDecomposeLoading(false);
+    }
+  };
+
+  const handleSelectStrategy = (ideaIndex: number, strategyIndex: number) => {
+    setSelected((prev) => ({ ...prev, [ideaIndex]: strategyIndex }));
+  };
+
+  const handleDecomposePlan = async () => {
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid || !decomposeAnalysisId) return;
+
+    const selections = Object.entries(selected).map(([ideaIndex, strategyIndex]) => ({
+      idea_index: Number(ideaIndex),
+      strategy_index: strategyIndex,
+    }));
+    if (selections.length === 0) return;
+
+    setPlanLoading(true);
+    setDecomposeError(null);
+
+    try {
+      const res = await fetch("/api/analysis/decompose/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_uuid: clientUuid,
+          analysis_id: decomposeAnalysisId,
+          selections,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Не удалось разложить в план");
+      }
+
+      setPlannedGoals(Array.isArray(data.goals) ? data.goals : []);
+    } catch (err) {
+      setDecomposeError(err instanceof Error ? err.message : "Ошибка соединения");
+    } finally {
+      setPlanLoading(false);
+    }
   };
 
   const handleBookingOk = async () => {
@@ -239,6 +367,18 @@ export default function IdeaPage() {
                     </button>
 
                     <button
+                      onClick={handleDecompose}
+                      disabled={decomposeLoading || !goal || goal.status === "trash" || !hasDefaultInterview}
+                      className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+                    >
+                      {decomposeLoading
+                        ? "Декомпозирую..."
+                        : decomposeAnalysisId
+                          ? "Перезапустить декомпозицию"
+                          : "Декомпозиция"}
+                    </button>
+
+                    <button
                       onClick={() => {
                         if (!goal) return;
                         handleWithSubscription(() =>
@@ -261,6 +401,18 @@ export default function IdeaPage() {
                       </button>
                     )}
                   </div>
+
+                  {!hasDefaultInterview && (
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      Чтобы разложить цель, сначала пройдите полное интервью.
+                    </p>
+                  )}
+
+                  {decomposeError && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-300">
+                      {decomposeError}
+                    </div>
+                  )}
 
                   {sabotageLoading && (
                     <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
@@ -309,6 +461,141 @@ export default function IdeaPage() {
                             </p>
                           );
                         })}
+                      </div>
+                    </div>
+                  )}
+
+                  {decomposeLoading && (
+                    <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                      <div className="flex items-center gap-3">
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-black border-t-transparent dark:border-white dark:border-t-transparent" />
+                        <span className="text-sm text-zinc-600 dark:text-zinc-400">
+                          Декомпозиция цели в процессе...
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {decomposeIdeas.length > 0 && !decomposeLoading && (
+                    <div className="space-y-4">
+                      <div className="space-y-3">
+                        {decomposeIdeas.map((item) => (
+                          <div
+                            key={item.id}
+                            className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900"
+                          >
+                            <h3 className="text-sm font-semibold text-black dark:text-zinc-50">
+                              {item.title}
+                            </h3>
+                            {item.description && (
+                              <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">
+                                {item.description}
+                              </p>
+                            )}
+                            <div className="mt-4 grid gap-3 md:grid-cols-2">
+                              {item.strategies.map((strategy) => {
+                                const isSelected = selected[item.idea_index] === strategy.strategy_index;
+                                return (
+                                  <button
+                                    key={strategy.id}
+                                    type="button"
+                                    onClick={() =>
+                                      handleSelectStrategy(item.idea_index, strategy.strategy_index)
+                                    }
+                                    className={`rounded-xl border-2 p-4 text-left transition-colors hover:border-zinc-500 ${
+                                      isSelected
+                                        ? "border-black dark:border-white"
+                                        : "border-zinc-200 dark:border-zinc-700"
+                                    }`}
+                                  >
+                                    <div className="flex items-start justify-between gap-2">
+                                      <h4 className="text-sm font-medium text-black dark:text-zinc-50">
+                                        {strategy.title}
+                                      </h4>
+                                      {isSelected && (
+                                        <span className="shrink-0 rounded-full bg-black px-2 py-0.5 text-[10px] font-medium text-white dark:bg-white dark:text-black">
+                                          Выбрана
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                                      Шагов: {strategy.steps.length}
+                                    </p>
+                                    <div className="mt-3 space-y-2">
+                                      {strategy.steps.map((step, stepIndex) => (
+                                        <div
+                                          key={`${strategy.id}-${stepIndex}`}
+                                          className="flex items-start gap-2 rounded-lg border border-zinc-200 p-2 dark:border-zinc-700"
+                                        >
+                                          <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
+                                            {stepIndex + 1}
+                                          </span>
+                                          <span className="min-w-0 flex-1">
+                                            <span className="block text-sm text-zinc-700 dark:text-zinc-200">
+                                              {step.title}
+                                            </span>
+                                            {step.description && (
+                                              <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                                                {step.description}
+                                              </span>
+                                            )}
+                                            {step.estimated_days > 0 && (
+                                              <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                                                Срок: {step.estimated_days} дн.
+                                              </span>
+                                            )}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="sticky bottom-4 rounded-xl border border-zinc-200 bg-white/95 p-4 shadow-lg backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
+                        {plannedGoals ? (
+                          <div className="space-y-2">
+                            <p className="text-sm font-medium text-black dark:text-zinc-50">
+                              Создано целей: {plannedGoals.length}
+                            </p>
+                            {plannedGoals.map((planned) => (
+                              <a
+                                key={planned.id}
+                                href={`/planner/goal?id=${encodeURIComponent(planned.id)}`}
+                                className="block rounded-md border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:border-black dark:border-zinc-700 dark:text-zinc-200 dark:hover:border-white"
+                              >
+                                {planned.title} · шагов: {planned.stepCount}
+                              </a>
+                            ))}
+                            <a
+                              href="/planner"
+                              className="block text-center text-xs text-zinc-500 underline dark:text-zinc-400"
+                            >
+                              Ко всем целям
+                            </a>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={handleDecomposePlan}
+                              disabled={
+                                planLoading || Object.keys(selected).length === 0 || !decomposeAnalysisId
+                              }
+                              className="w-full rounded-md bg-black px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+                            >
+                              {planLoading ? "Разкладываю..." : "Разложить в план"}
+                            </button>
+                            <p className="mt-2 text-center text-xs text-zinc-500 dark:text-zinc-400">
+                              Выбрано идей: {Object.keys(selected).length}. Для каждой идеи можно выбрать
+                              только одну стратегию.
+                            </p>
+                          </>
+                        )}
                       </div>
                     </div>
                   )}

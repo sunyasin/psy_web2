@@ -19,6 +19,7 @@ export async function GET(request: Request) {
       .from("interview_analyses")
       .select("*")
       .eq("client_uuid", clientUuid)
+      .eq("kind", "short")
       .order("created_at", { ascending: false });
 
     console.log("[api/results] Analyses result:", { count: analyses?.length, error: analysesError?.message });

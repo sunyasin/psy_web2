@@ -274,6 +274,8 @@ export interface GoalRow {
   status?: string | null;
   paused_reason?: string | null;
   source_analysis_id?: string | null;
+  decomposition_analysis_id?: string | null;
+  has_default_interview?: boolean;
   conflict_analysis?: string | null;
   created_at: string;
 }

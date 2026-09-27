@@ -66,6 +66,7 @@ export async function loadLastSessionSummary(clientUuid: string): Promise<LastSe
     .from("interview_analyses")
     .select("model_json")
     .eq("client_uuid", clientUuid)
+    .eq("kind", "short")
     .order("created_at", { ascending: false })
     .limit(1)
     .maybeSingle();

@@ -7,6 +7,7 @@ export async function GET() {
     const { data, error } = await supabase
       .from("interview")
       .select("id, name")
+      .eq("visible", true)
       .order("name", { ascending: true });
 
     if (error) {

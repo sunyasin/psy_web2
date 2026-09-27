@@ -43,6 +43,7 @@ export async function POST(request: Request) {
           .from("interview_analyses")
           .select("model_json")
           .eq("interview_session_id", session.id)
+          .eq("kind", "short")
           .order("created_at", { ascending: false })
           .limit(1)
           .maybeSingle();

@@ -179,6 +179,7 @@ export async function POST(request: Request) {
       .from("interview_analyses")
       .select("id")
       .eq("interview_session_id", session.id)
+      .eq("kind", "short")
       .maybeSingle();
 
     if (existingAnalysis) {

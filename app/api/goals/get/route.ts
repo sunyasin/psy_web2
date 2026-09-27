@@ -23,7 +23,28 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Goal not found" }, { status: 404 });
     }
 
-    return NextResponse.json({ goal: data });
+    // Декомпозиция цели доступна только после завершённого большого интервью.
+    const { data: defaultInterview } = await supabase
+      .from("interview")
+      .select("id")
+      .eq("code", "default")
+      .eq("visible", true)
+      .maybeSingle();
+
+    let hasDefaultInterview = false;
+    if (defaultInterview) {
+      const { data: session } = await supabase
+        .from("interview_sessions")
+        .select("id")
+        .eq("client_uuid", clientUuid)
+        .eq("interview_id", defaultInterview.id)
+        .eq("status", "completed")
+        .limit(1)
+        .maybeSingle();
+      hasDefaultInterview = Boolean(session);
+    }
+
+    return NextResponse.json({ goal: { ...data, has_default_interview: hasDefaultInterview } });
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Invalid request" },

@@ -209,6 +209,7 @@ export async function GET(request: Request) {
       .from("interview_analyses")
       .select("*")
       .eq("client_uuid", clientUuid)
+      .eq("kind", "short")
       .order("created_at", { ascending: false })
       .limit(20);
     if (analysisError) {
