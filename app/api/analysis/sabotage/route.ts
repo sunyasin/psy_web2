@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
+import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers, type AnswerItem } from "@/lib/interview-prompt";
 
 export async function POST(request: Request) {
   try {
@@ -26,7 +27,7 @@ export async function POST(request: Request) {
 
     const { data: session } = await supabase
       .from("interview_sessions")
-      .select("id, answers")
+      .select("id, answers, interview_id")
       .eq("client_uuid", client_uuid)
       .eq("status", "completed")
       .order("created_at", { ascending: false })
@@ -35,11 +36,12 @@ export async function POST(request: Request) {
 
     // Prefer raw_answers from interview_analyses linked to the session or latest for client
     let rawAnswers: Record<string, Record<string, string>> = {};
+    let sourceInterviewId: string | null = (session?.interview_id as string) || null;
 
     if (session?.id) {
       const { data: analysis } = await supabase
         .from("interview_analyses")
-        .select("raw_answers")
+        .select("raw_answers, interview_id")
         .eq("interview_session_id", session.id)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -47,13 +49,14 @@ export async function POST(request: Request) {
 
       if (analysis?.raw_answers && typeof analysis.raw_answers === "object") {
         rawAnswers = analysis.raw_answers as Record<string, Record<string, string>>;
+        sourceInterviewId = (analysis.interview_id as string) || sourceInterviewId;
       }
     }
 
     if (Object.keys(rawAnswers).length === 0) {
       const { data: latestAnalysis } = await supabase
         .from("interview_analyses")
-        .select("raw_answers")
+        .select("raw_answers, interview_id")
         .eq("client_uuid", client_uuid)
         .order("created_at", { ascending: false })
         .limit(1)
@@ -61,18 +64,32 @@ export async function POST(request: Request) {
 
       if (latestAnalysis?.raw_answers && typeof latestAnalysis.raw_answers === "object") {
         rawAnswers = latestAnalysis.raw_answers as Record<string, Record<string, string>>;
+        sourceInterviewId = (latestAnalysis.interview_id as string) || sourceInterviewId;
       }
     }
 
-    const flatAnswers = Object.values(rawAnswers)
-      .filter((block) => typeof block === "object" && block !== null && block !== (rawAnswers as any).block4_trigger)
-      .flatMap((block) => {
-        if (block === (rawAnswers as any).block4_trigger) return [];
-        return Object.values(block as Record<string, string>);
-      });
+    // raw_analyses хранит и { "<block>": { "<order>": text } }, и { "session_N": { "<block>.<order>": text } }
+    const answerItems: AnswerItem[] = [];
+    for (const [group, values] of Object.entries(rawAnswers)) {
+      if (!values || typeof values !== "object" || Array.isArray(values)) continue;
+      const normalized: Record<string, Record<string, string>> = {};
+      for (const [key, text] of Object.entries(values as Record<string, string>)) {
+        const [block, order] = key.includes(".") ? key.split(".") : [group, key];
+        normalized[block] ||= {};
+        normalized[block][order] = text;
+      }
+      answerItems.push(...flattenAnswers(normalized, sourceInterviewId));
+    }
+
+    const flatAnswers = answerItems.map((item) => item.answer);
 
     const ruleFlags = detectSabotageRules(flatAnswers);
-    const llmPrompt = buildPrompt(goal, flatAnswers, ruleFlags);
+    const questionIndex = await loadQuestionIndex([sourceInterviewId]);
+    const llmPrompt = buildPrompt(
+      goal,
+      formatNumberedQA(numberAnswers(answerItems, questionIndex)),
+      ruleFlags
+    );
 
     let analysisText: string;
     if (!claudeConfigured()) {
@@ -141,15 +158,15 @@ function detectSabotageRules(answers: string[]): { pattern: string; domains: str
   return flags;
 }
 
-function buildPrompt(goal: any, answers: string[], flags: { pattern: string; domains: string[]; description: string }[]): string {
+function buildPrompt(goal: any, qaText: string, flags: { pattern: string; domains: string[]; description: string }[]): string {
   const goalText = typeof goal.smart_json === "object" && goal.smart_json
     ? JSON.stringify(goal.smart_json)
     : goal.title;
 
   return `Цель пользователя: ${goalText}
 
-Ответы на интервью:
-${answers.map((a, i) => `${i + 1}. ${a}`).join("\n")}
+Вопросы и ответы на интервью:
+${qaText}
 
 Правильные флаги (self_sabotage_detector):
 ${flags.length > 0 ? flags.map((f) => `- ${f.pattern} (сферы: ${f.domains.join(", ")}): ${f.description}`).join("\n") : "Правильный детектор не нашёл явных паттернов."}

@@ -6,7 +6,7 @@ export async function GET() {
     const supabase = getSupabaseServerClient();
     const { data, error } = await supabase
       .from("interview")
-      .select("id, name")
+      .select("id, name, code")
       .eq("visible", true)
       .order("name", { ascending: true });
 

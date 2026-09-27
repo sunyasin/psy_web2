@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
+import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers } from "@/lib/interview-prompt";
 
 export async function GET(request: Request) {
   try {
@@ -29,13 +30,9 @@ export async function GET(request: Request) {
     }
 
     const answers = (session.answers as Record<string, Record<string, string>>) || {};
-    const flatAnswers = Object.values(answers)
-      .filter((block) => typeof block === "object" && block !== null && block !== (answers as any).block4_trigger)
-      .flatMap((block) => {
-        if (block === (answers as any).block4_trigger) return [];
-        return Object.values(block as Record<string, string>);
-      });
-    
+    const answerItems = flattenAnswers(answers, session.interview_id as string);
+    const flatAnswers = answerItems.map((item) => item.answer);
+
     const answerCount = flatAnswers.length;
     const profileText = flatAnswers.join(" ").toLowerCase();
 
@@ -52,7 +49,8 @@ export async function GET(request: Request) {
     const systemPrompt = interview?.prompt || "Ты — карьерный и жизненный стратег. Ты говоришь по-русски. Проанализируй ответы и предложи 5 идей в JSON.";
 
     try {
-      const promptText = flatAnswers.map((text, idx) => `Ответ ${idx + 1}: ${text}`).join("\n");
+      const questionIndex = await loadQuestionIndex([session.interview_id as string]);
+      const promptText = formatNumberedQA(numberAnswers(answerItems, questionIndex));
       const response = await callClaude(
         [{ role: "user", text: promptText }],
         systemPrompt,

@@ -6,29 +6,14 @@ Add a "Welcome/Entrance Interview" (code: `welcome`) as the first required step 
 ## Database Changes
 
 ### 1. Add Welcome Interview to `interview` table
-Create migration to insert the welcome interview:
+Create migration to insert the welcome interview (empty prompt - no analysis):
 ```sql
 INSERT INTO interview (id, code, name, prompt, visible)
 SELECT
   '00000000-0000-0000-0000-000000000003',
   'welcome',
   'Входное интервью',
-  $prompt$Ты — психологический стратег. Проанализируй ответы на входное интервью и выдели ключевые внутренние конфликты, повторяющиеся паттерны и зоны роста.
-  
-  Формат ответа — строго JSON:
-  {
-    "key_tensions": ["напряжение 1", "напряжение 2"],
-    "recurring_patterns": ["паттерн 1", "паттерн 2"],
-    "tried_methods": ["метод 1", "метод 2"],
-    "failed_aspects": ["что не сработало 1"],
-    "target_reaction": "внутренняя реакция для изменения",
-    "recommendation": "Краткая рекомендация куда двигаться дальше"
-  }
-  
-  Правила:
-  - Отвечай строго на русском
-  - Не используй markdown, только чистый JSON
-  - JSON должен быть валидным$prompt$,
+  '',
   true
 WHERE NOT EXISTS (SELECT 1 FROM interview WHERE code = 'welcome');
 ```
@@ -65,6 +50,8 @@ FROM interview i WHERE i.code = 'welcome';
     - Button navigates to `/` (main page)
     - Hide the welcome interview button from main menu after completion
   - Store completion status in localStorage or check via API
+  - **NO analysis step** - empty prompt in DB means no analysis will be triggered
+  - The `analyzeInterviewAnswers` action will not be called for welcome interview
 
 ### 4. Update Main Page (`app/page.tsx`)
 - Add welcome interview completion check in the initial `useEffect`
@@ -89,10 +76,10 @@ FROM interview i WHERE i.code = 'welcome';
 1. **New user** → `/welcome` (enter name) → `/` (main page)
 2. **Main page loads** → checks `hasCompleted` for `welcome` interview
 3. **If not completed**: Show "Входное интервью" button FIRST, all other buttons disabled
-4. **Click "Входное интервью"** → `/interview?code=welcome` (or `/welcome-interview`)
+4. **Click "Входное интервью"** → `/welcome-interview`
 5. **Answer 5 questions** → on last question completion:
    - Session status = "completed"
-   - Show "Перейти в главное меню" button
+   - Show "Перейти в главное меню" button (NO analysis triggered - empty prompt)
    - Click → redirect to `/`
 6. **Main page reloads** → welcome interview completed → hide welcome button, enable all other buttons
 
@@ -129,12 +116,15 @@ setWelcomeCompleted(welcomeData.completed);
 ```typescript
 // In app/welcome-interview/page.tsx
 // When question.completed === true (after 5th question)
+// NO analysis - just show menu button
 {question.completed && (
   <button onClick={() => window.location.href = "/"} className="w-full bg-black text-white...">
     Перейти в главное меню
   </button>
 )}
 ```
+
+The existing `analyzeInterviewAnswers` action checks for `status === "completed"` and will find the welcome interview session, but since the prompt is empty, it would fail or return nothing. The welcome interview page should NOT call the analyze action at all - it just shows the menu button.
 
 ## Migration Files to Create
 1. `supabase/migrations/20260927000001_add_welcome_interview.sql` - Add interview record
@@ -160,6 +150,8 @@ setWelcomeCompleted(welcomeData.completed);
 - **Risk**: Interview session logic expects multiple blocks
   - **Mitigation**: Welcome interview uses single block, existing logic handles this (block 1 → completed)
 - **Risk**: Analysis button logic triggers on completion
-  - **Mitigation**: Custom welcome interview page bypasses analysis, shows menu button instead
+  - **Mitigation**: Custom welcome interview page bypasses analysis, shows menu button instead. Empty prompt in DB means no analysis runs.
+- **Risk**: `analyzeInterviewAnswers` might be called on welcome interview session
+  - **Mitigation**: Welcome interview page doesn't call analyze action. If somehow called, empty prompt returns empty result - harmless.
 - **Race condition**: User completes welcome interview but main page doesn't refresh
   - **Mitigation**: Redirect to `/` triggers full page reload, re-checks completion status

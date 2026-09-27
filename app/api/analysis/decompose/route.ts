@@ -10,6 +10,7 @@ import {
   toDecomposePayload,
 } from "./parser";
 import type { DecomposeIdea, PlannedIdeaInfo } from "./parser";
+import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers, type AnswerItem } from "@/lib/interview-prompt";
 
 /**
  * Декомпозиция одной цели со страницы идеи.
@@ -150,16 +151,17 @@ export async function POST(request: Request) {
       );
     }
 
-    const { rawAnswers, promptLines } = collectAnswers(sessions);
-    if (promptLines.length === 0) {
+    const { rawAnswers, answerItems } = collectAnswers(sessions, fullInterview.id);
+    if (answerItems.length === 0) {
       return NextResponse.json({ error: "В полном интервью нет ответов" }, { status: 404 });
     }
 
+    const questionIndex = await loadQuestionIndex([fullInterview.id]);
     const promptText = [
       `Цель, которую нужно разложить: ${buildGoalContext(goal)}`,
       "",
-      "Ответы на полное интервью:",
-      promptLines.join("\n"),
+      "Вопросы и ответы полного интервью:",
+      formatNumberedQA(numberAnswers(answerItems, questionIndex)),
     ].join("\n");
 
     let modelJson: unknown = { fallback: true };
@@ -220,7 +222,7 @@ export async function POST(request: Request) {
         goal_answer: goal.title,
         model_json: modelJson,
         model_used: modelUsed,
-        answer_count: promptLines.length,
+        answer_count: answerItems.length,
       })
       .select("id")
       .single();
@@ -251,7 +253,7 @@ export async function POST(request: Request) {
       client_uuid: clientUuid,
       goal_answer: goal.title,
       model_json: modelJson,
-      answer_count: promptLines.length,
+      answer_count: answerItems.length,
       created_at: new Date().toISOString(),
     });
     payload.plannedIdeas = await loadPlannedIdeas(supabase, clientUuid, payload.ideas);
@@ -325,23 +327,19 @@ function buildGoalContext(goal: Record<string, unknown>): string {
 }
 
 function collectAnswers(
-  sessions: Array<{ answers: unknown }>
-): { rawAnswers: Record<string, Record<string, string>>; promptLines: string[] } {
+  sessions: Array<{ answers: unknown }>,
+  interviewId?: string
+): { rawAnswers: Record<string, Record<string, string>>; answerItems: AnswerItem[] } {
   const rawAnswers: Record<string, Record<string, string>> = {};
-  const promptLines: string[] = [];
+  const answerItems: AnswerItem[] = [];
 
   for (const session of sessions) {
-    const answers = (session.answers || {}) as Record<string, unknown>;
-    for (const [block, blockAnswers] of Object.entries(answers)) {
-      if (block === "block4_trigger" || !blockAnswers || typeof blockAnswers !== "object") continue;
-      for (const [order, text] of Object.entries(blockAnswers as Record<string, unknown>)) {
-        if (typeof text !== "string" || !text.trim()) continue;
-        rawAnswers[block] ||= {};
-        rawAnswers[block][order] = text;
-        promptLines.push(`Блок ${block}, вопрос ${order}: ${text.trim()}`);
-      }
+    for (const item of flattenAnswers(session.answers, interviewId)) {
+      rawAnswers[item.block] ||= {};
+      rawAnswers[item.block][item.order] = item.answer;
+      answerItems.push(item);
     }
   }
 
-  return { rawAnswers, promptLines };
+  return { rawAnswers, answerItems };
 }

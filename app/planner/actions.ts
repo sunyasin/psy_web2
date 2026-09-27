@@ -252,3 +252,71 @@ export async function updatePlannerStep(
 
   return updated as unknown as PlannerStepRow;
 }
+
+export async function deleteGoal(clientUuid: string, goalId: string): Promise<{ success: boolean; warning?: string }> {
+  const supabase = getSupabaseServerClient();
+
+  // First check if goal exists and belongs to user
+  const { data: goal, error: goalError } = await supabase
+    .from("goals")
+    .select("id, title")
+    .eq("id", goalId)
+    .eq("client_uuid", clientUuid)
+    .maybeSingle();
+
+  if (goalError || !goal) {
+    throw new Error("Цель не найдена");
+  }
+
+  // Check for started steps (in_progress or finished)
+  const { data: steps, error: stepsError } = await supabase
+    .from("planner_steps")
+    .select("id, status")
+    .eq("goal_id", goalId)
+    .eq("client_uuid", clientUuid)
+    .in("status", ["in_progress", "finished"]);
+
+  if (stepsError) {
+    throw new Error("Ошибка проверки шагов");
+  }
+
+  const hasStartedSteps = steps && steps.length > 0;
+
+  // Delete steps first (cascade), then stages, then goal
+  // Using status = 'deleted' soft delete for steps and stages
+  const { error: stepsDeleteError } = await supabase
+    .from("planner_steps")
+    .update({ status: "deleted", updated_at: new Date().toISOString() })
+    .eq("goal_id", goalId)
+    .eq("client_uuid", clientUuid);
+
+  if (stepsDeleteError) {
+    throw new Error("Ошибка удаления шагов: " + stepsDeleteError.message);
+  }
+
+  const { error: stagesDeleteError } = await supabase
+    .from("planner_stages")
+    .update({ status: "deleted", updated_at: new Date().toISOString() })
+    .eq("goal_id", goalId)
+    .eq("client_uuid", clientUuid);
+
+  if (stagesDeleteError) {
+    throw new Error("Ошибка удаления этапов: " + stagesDeleteError.message);
+  }
+
+  // Hard delete the goal (or soft delete with status='trash')
+  const { error: goalDeleteError } = await supabase
+    .from("goals")
+    .update({ status: "trash", deleted_at: new Date().toISOString() })
+    .eq("id", goalId)
+    .eq("client_uuid", clientUuid);
+
+  if (goalDeleteError) {
+    throw new Error("Ошибка удаления цели: " + goalDeleteError.message);
+  }
+
+  return { 
+    success: true, 
+    warning: hasStartedSteps ? "Цель и все её этапы и шаги удалены. Были начатые шаги." : undefined 
+  };
+}

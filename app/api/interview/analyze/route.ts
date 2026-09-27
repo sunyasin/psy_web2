@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
 import type { InterviewConfigRow, InterviewSessionRow, Idea } from "@/lib/types";
+import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers } from "@/lib/interview-prompt";
 
 async function getBlockConfig(blockNumber: number, interviewId?: string): Promise<InterviewConfigRow | null> {
   const supabase = getSupabaseServerClient();
@@ -22,17 +23,6 @@ async function getBlockConfig(blockNumber: number, interviewId?: string): Promis
   }
 
   return data as InterviewConfigRow;
-}
-
-function formatAnswersForPrompt(answers: Record<string, Record<string, string>>): string {
-  const lines: string[] = [];
-  for (const [block, blockAnswers] of Object.entries(answers)) {
-    if (block === "block4_trigger") continue;
-    for (const [order, text] of Object.entries(blockAnswers)) {
-      lines.push(`Блок ${block}, вопрос ${order}: ${text}`);
-    }
-  }
-  return lines.join("\n");
 }
 
 function generateFallbackIdeas(
@@ -190,13 +180,13 @@ export async function POST(request: Request) {
     }
 
     const answers = (session.answers as Record<string, Record<string, string>>) || {};
-    const flatAnswers = Object.values(answers)
-      .filter((block): block is Record<string, string> => typeof block === "object" && block !== null)
-      .flatMap((block) => Object.values(block));
+    const answerItems = flattenAnswers(answers, session.interview_id as string);
+    const flatAnswers = answerItems.map((item) => item.answer);
 
     const answerCount = flatAnswers.length;
     const profileText = flatAnswers.join(" ").toLowerCase();
-    const promptText = flatAnswers.map((text, idx) => `Ответ ${idx + 1}: ${text}`).join("\n");
+    const questionIndex = await loadQuestionIndex([session.interview_id as string]);
+    const promptText = formatNumberedQA(numberAnswers(answerItems, questionIndex));
 
     let ideas: Idea[];
     let modelJson: any = null;

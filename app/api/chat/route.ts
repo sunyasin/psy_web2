@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
+import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers } from "@/lib/interview-prompt";
 
 export async function POST(request: Request) {
   try {
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
     if (history.length === 0) {
       const { data: session } = await supabase
         .from("interview_sessions")
-        .select("id, answers")
+        .select("id, answers, interview_id")
         .eq("client_uuid", client_uuid)
         .eq("status", "completed")
         .order("created_at", { ascending: false })
@@ -26,17 +27,12 @@ export async function POST(request: Request) {
         .maybeSingle();
 
       if (session) {
-        const answers = (session.answers as Record<string, Record<string, string>>) || {};
-        const lines: string[] = [];
-        for (const [block, blockAnswers] of Object.entries(answers)) {
-          if (block === "block4_trigger") continue;
-          if (typeof blockAnswers !== "object" || blockAnswers === null) continue;
-          for (const [order, text] of Object.entries(blockAnswers)) {
-            lines.push(`Блок ${block}, вопрос ${order}: ${text}`);
-          }
-        }
-        if (lines.length > 0) {
-          contextText = "Ответы пользователя на интервью:\n" + lines.join("\n");
+        const answerItems = flattenAnswers(session.answers, session.interview_id as string);
+        if (answerItems.length > 0) {
+          const questionIndex = await loadQuestionIndex([session.interview_id as string]);
+          contextText =
+            "Вопросы и ответы пользователя на интервью:\n" +
+            formatNumberedQA(numberAnswers(answerItems, questionIndex));
         }
 
         const { data: analyses } = await supabase

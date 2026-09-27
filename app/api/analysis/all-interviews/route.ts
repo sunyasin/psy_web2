@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
+import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers, type AnswerItem } from "@/lib/interview-prompt";
 
 export async function GET(request: Request) {
   try {
@@ -29,7 +30,7 @@ export async function GET(request: Request) {
     }
 
     // Combine answers from all completed sessions
-    let allFlatAnswers: string[] = [];
+    const allAnswerItems: AnswerItem[] = [];
     let totalAnswerCount = 0;
     const allRawAnswers: Record<string, Record<string, string>> = {};
 
@@ -45,16 +46,13 @@ export async function GET(request: Request) {
           Object.assign(allRawAnswers[block], blockAnswers);
         }
       }
-      
-      const flatAnswers = Object.values(answers)
-        .filter((block): block is Record<string, string> => 
-          typeof block === "object" && block !== null && block !== (answers as any).block4_trigger
-        )
-        .flatMap((block) => Object.values(block));
-      
-      allFlatAnswers = allFlatAnswers.concat(flatAnswers);
-      totalAnswerCount += flatAnswers.length;
+
+      const items = flattenAnswers(answers, session.interview_id as string);
+      allAnswerItems.push(...items);
+      totalAnswerCount += items.length;
     }
+
+    const allFlatAnswers = allAnswerItems.map((item) => item.answer);
 
     if (allFlatAnswers.length === 0) {
       return NextResponse.json(
@@ -104,7 +102,10 @@ if (!claudeConfigured()) {
     const systemPrompt = interview?.prompt || "Ты — карьерный и жизненный стратег. Ты говоришь по-русски. Проанализируй ответы и предложи 5 идей в JSON.";
 
     try {
-      const promptText = allFlatAnswers.map((text, idx) => `Ответ ${idx + 1}: ${text}`).join("\n");
+      const questionIndex = await loadQuestionIndex(
+        sessions.map((session) => session.interview_id as string)
+      );
+      const promptText = formatNumberedQA(numberAnswers(allAnswerItems, questionIndex));
       const response = await callClaude(
         [{ role: "user", text: promptText }],
         systemPrompt,

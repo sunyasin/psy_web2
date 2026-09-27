@@ -38,7 +38,7 @@ function extractIdeasFromModelJson(analysis: InterviewAnalysisRow): Idea[] {
 
 export default function ResultsPage() {
   const router = useRouter();
-  const [interviews, setInterviews] = useState<{ id: string; name: string }[]>([]);
+  const [interviews, setInterviews] = useState<{ id: string; name: string; code: string }[]>([]);
   const [selectedInterviewId, setSelectedInterviewId] = useState("");
   const [results, setResults] = useState<InterviewAnalysisRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,13 +60,6 @@ export default function ResultsPage() {
   const [completedWithoutAnalysis, setCompletedWithoutAnalysis] = useState(false);
   const [analysisNeedsRerun, setAnalysisNeedsRerun] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
-  const [subscriptionTier] = useState<string>(() => {
-    try {
-      return typeof window !== "undefined" ? (localStorage.getItem("subscription_tier") || "free_trial") : "free_trial";
-    } catch {
-      return "free_trial";
-    }
-  });
 
   const workedIdeaIndices = useMemo(() => {
     const current = results[0];
@@ -91,6 +84,9 @@ export default function ResultsPage() {
     return indices;
   }, [results, goals, workedGoalIds]);
 
+  // Resolve the interview code for the currently selected interview (always 'default' on this page)
+  const selectedInterviewCode = interviews.find((i) => i.id === selectedInterviewId)?.code || "default";
+
   useEffect(() => {
     const clientUuid = localStorage.getItem("client_uuid");
     if (!clientUuid) {
@@ -109,7 +105,11 @@ export default function ResultsPage() {
         const interviewsData = await interviewsRes.json();
         if (interviewsData.interviews && interviewsData.interviews.length > 0) {
           setInterviews(interviewsData.interviews);
-          setSelectedInterviewId(interviewsData.interviews[0].id);
+          // Always default to the main (core) interview with code 'default'
+          const defaultInterview = interviewsData.interviews.find(
+            (i: { code: string }) => i.code === "default"
+          );
+          setSelectedInterviewId(defaultInterview ? defaultInterview.id : interviewsData.interviews[0].id);
         }
 
         const goalsData = await goalsRes.json();
@@ -201,17 +201,19 @@ export default function ResultsPage() {
           const hasValidModelJson = analysis && analysis.model_json;
           setCompletedWithoutAnalysis(!hasAnalysis);
           setAnalysisNeedsRerun(hasAnalysis && !hasValidModelJson);
-        } else {
-          setCompletedWithoutAnalysis(false);
-          setAnalysisNeedsRerun(false);
-        }
+          } else {
+            setCompletedWithoutAnalysis(false);
+            setAnalysisNeedsRerun(false);
+            // Main interview not completed — redirect to /interview
+             localStorage.setItem("selected_interview_code", selectedInterviewCode);
+             window.location.href = "/interview";
+          }
       } catch (err) {
         console.error("Failed to check completed status:", err);
-        setCompletedWithoutAnalysis(false);
-        setAnalysisNeedsRerun(false);
-      }
-    })();
-  }, [selectedInterviewId]);
+       setAnalysisNeedsRerun(false);
+       }
+     })();
+   }, [selectedInterviewId, interviews, selectedInterviewCode]);
 
   const currentResult = results[0] || null;
   const ideas: Idea[] = currentResult ? extractIdeasFromModelJson(currentResult) : [];
@@ -261,9 +263,9 @@ export default function ResultsPage() {
     }
   }
 
-  function handleRetake() {
-    localStorage.setItem("selected_interview_id", selectedInterviewId);
-    window.location.href = "/interview";
+   function handleRetake() {
+     localStorage.setItem("selected_interview_code", selectedInterviewCode);
+     window.location.href = "/interview";
   }
 
   async function handleStartAnalysis() {
@@ -297,11 +299,13 @@ export default function ResultsPage() {
     }
   }
 
-  function handleSelfTry() {
+   function handleSelfTry() {
     setSabotageAnalysis(null);
     setSelectionError(null);
     setSelectedGoalId(null);
   }
+
+
 
   const [savingIdea, setSavingIdea] = useState(false);
 
@@ -470,42 +474,8 @@ export default function ResultsPage() {
     <div className="flex flex-col flex-1 items-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex w-full flex-1 flex-col">
         <div className="flex w-full flex-col gap-4 p-4 md:flex-row md:gap-0 md:p-0">
-          <aside className="sticky top-0 self-start w-full overflow-y-auto border-b border-zinc-200 bg-white pb-4 dark:border-zinc-800 dark:bg-black md:border-b-0 md:border-r md:pb-0 md:w-64">
-            <button
-              onClick={() => router.push("/")}
-              className="w-full rounded-md px-3 py-2 text-left text-sm text-zinc-600 hover:bg-zinc-50 transition-colors dark:text-zinc-400 dark:hover:bg-zinc-900"
-            >
-              Главное меню
-            </button>
-            <div className="p-4">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-                Интервью
-              </h2>
-            </div>
-            <nav className="px-2 pb-4">
-              {interviews.map((interview) => (
-                <button
-                  key={interview.id}
-                  onClick={() => setSelectedInterviewId(interview.id)}
-                  className={`w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
-                    selectedInterviewId === interview.id
-                      ? "bg-zinc-100 text-black dark:bg-zinc-900 dark:text-zinc-50"
-                      : "text-zinc-600 hover:bg-zinc-50 dark:text-zinc-400 dark:hover:bg-zinc-900"
-                  }`}
-                >
-                  {interview.name}
-                </button>
-              ))}
-            </nav>
-          </aside>
-
           <section className="flex w-full flex-1 flex-col bg-white dark:bg-black">
             <div className="p-6">
-              {subscriptionTier !== "paid" && (
-                <div className="mb-4 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-2 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-                  Тариф: бесплатный пробный период
-                </div>
-              )}
               {completedWithoutAnalysis || analysisNeedsRerun ? (
                 <div className="flex h-full flex-col items-center justify-center text-center">
                   <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
@@ -521,14 +491,14 @@ export default function ResultsPage() {
                     {analyzing ? "Анализирую..." : analysisNeedsRerun ? "Повторить анализ" : "Начать анализ интервью"}
                   </button>
                 </div>
-              ) : ideas.length === 0 ? (
+               ) : ideas.length === 0 ? (
                 <div className="flex h-full flex-col items-center justify-center text-center">
                   <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
                     Нет результатов. Пройдите интервью, чтобы получить анализ.
                   </p>
                   <button
                     onClick={() => {
-                      localStorage.setItem("selected_interview_id", selectedInterviewId);
+                      localStorage.setItem("selected_interview_code", selectedInterviewCode);
                       router.push("/interview");
                     }}
                     className="rounded-md bg-black px-6 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-black dark:hover:bg-zinc-200"

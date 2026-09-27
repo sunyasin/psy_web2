@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
 import type { ShortAnalysisResult, ShortAnalysisStep, ShortAnalysisStrategy } from "@/lib/types";
+import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers, type AnswerItem } from "@/lib/interview-prompt";
 
 export async function GET(request: Request) {
   try {
@@ -39,29 +40,28 @@ export async function GET(request: Request) {
     }
 
     const rawAnswers: Record<string, Record<string, string>> = {};
-    const flatAnswers: string[] = [];
+    const answerItems: AnswerItem[] = [];
     let goalAnswer = "";
     for (const [sessionIndex, session] of sessions.entries()) {
-      const answers = (session.answers || {}) as Record<string, unknown>;
-      for (const [block, blockAnswers] of Object.entries(answers)) {
-        if (block === "block4_trigger" || !blockAnswers || typeof blockAnswers !== "object") continue;
-        const values = blockAnswers as Record<string, string>;
-        rawAnswers[`session_${sessionIndex + 1}`] ||= {};
-        for (const [order, text] of Object.entries(values)) {
-          if (typeof text !== "string" || !text.trim()) continue;
-          if (!goalAnswer && session.interview_id === shortInterview.id) goalAnswer = text.trim();
-          rawAnswers[`session_${sessionIndex + 1}`][`${block}.${order}`] = text;
-          flatAnswers.push(text);
-        }
+      const items = flattenAnswers(session.answers, session.interview_id as string);
+      if (items.length === 0) continue;
+      rawAnswers[`session_${sessionIndex + 1}`] = {};
+      for (const item of items) {
+        if (!goalAnswer && session.interview_id === shortInterview.id) goalAnswer = item.answer;
+        rawAnswers[`session_${sessionIndex + 1}`][`${item.block}.${item.order}`] = item.answer;
+        answerItems.push(item);
       }
     }
+
+    const flatAnswers = answerItems.map((item) => item.answer);
 
     if (flatAnswers.length === 0) {
       return NextResponse.json({ error: "No answers found in completed interviews" }, { status: 404 });
     }
 
     const profileText = flatAnswers.join(" ").toLowerCase();
-    const promptText = flatAnswers.map((text, index) => `Ответ ${index + 1}: ${text}`).join("\n");
+    const questionIndex = await loadQuestionIndex(interviewIds);
+    const promptText = formatNumberedQA(numberAnswers(answerItems, questionIndex));
     let strategies: ShortAnalysisResult[] = [];
     let modelUsed = "fallback";
     let modelJson: any = null;

@@ -163,7 +163,7 @@ export default function TariffsPage() {
             )}
 
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "12px", fontWeight: 600, color: "#3f3f46" }>Логин</label>
+              <label style={{ fontSize: "12px", fontWeight: 600, color: "#3f3f46" }}>Логин</label>
               <input
                 type="email"
                 value={login}
