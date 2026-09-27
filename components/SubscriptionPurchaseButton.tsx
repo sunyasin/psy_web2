@@ -10,6 +10,8 @@ interface SubscriptionPurchaseButtonProps {
   currency: string;
   clientUuid: string;
   paymentUrl: string | null;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 export function SubscriptionPurchaseButton({
@@ -18,6 +20,8 @@ export function SubscriptionPurchaseButton({
   currency,
   clientUuid,
   paymentUrl,
+  disabled,
+  disabledReason,
 }: SubscriptionPurchaseButtonProps) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -26,6 +30,7 @@ export function SubscriptionPurchaseButton({
 
   const handleSubscribe = async () => {
     setError(null);
+    if (disabled) return;
     setIsLoading(true);
 
     // Open popup immediately to avoid browser popup blocker
@@ -70,7 +75,7 @@ export function SubscriptionPurchaseButton({
     <div>
       <button
         onClick={handleSubscribe}
-        disabled={isLoading}
+        disabled={disabled || isLoading}
         style={{
           width: "100%",
           borderRadius: "6px",
@@ -79,13 +84,14 @@ export function SubscriptionPurchaseButton({
           padding: "10px 16px",
           fontSize: "14px",
           fontWeight: 500,
-          cursor: isLoading ? "not-allowed" : "pointer",
-          opacity: isLoading ? 0.5 : 1,
+          cursor: disabled || isLoading ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.5 : isLoading ? 0.5 : 1,
           border: "none",
         }}
       >
-        {isLoading ? "Создаю платёж..." : `Оплатить ${price} ${currency}`}
+        {disabled ? "Сначала сохраните данные для входа" : isLoading ? "Создаю платёж..." : `Оплатить ${price} ${currency}`}
       </button>
+      {disabledReason && <p style={{ marginTop: "8px", fontSize: "12px", color: "#71717a" }}>{disabledReason}</p>}
       {error && <p style={{ marginTop: "8px", fontSize: "12px", color: "#ef4444" }}>{error}</p>}
     </div>
   );

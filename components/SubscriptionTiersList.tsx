@@ -6,9 +6,11 @@ import { SubscriptionPurchaseButton } from "./SubscriptionPurchaseButton";
 
 interface SubscriptionTiersListProps {
   clientUuid: string;
+  canPurchase?: boolean;
+  purchaseDisabledReason?: string;
 }
 
-export function SubscriptionTiersList({ clientUuid }: SubscriptionTiersListProps) {
+export function SubscriptionTiersList({ clientUuid, canPurchase = true, purchaseDisabledReason }: SubscriptionTiersListProps) {
   const [tiers, setTiers] = useState<SubscriptionTierRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -76,14 +78,16 @@ export function SubscriptionTiersList({ clientUuid }: SubscriptionTiersListProps
           {tier.description && (
             <p style={{ marginTop: "8px", fontSize: "14px", color: "#71717a" }}>{tier.description}</p>
           )}
-          <div style={{ marginTop: "24px" }}>
-            <SubscriptionPurchaseButton
-              subscriptionTierId={tier.id}
-              price={tier.price}
-              currency={tier.currency}
-              clientUuid={clientUuid}
-              paymentUrl={tier.paymentUrl}
-            />
+           <div style={{ marginTop: "24px" }}>
+             <SubscriptionPurchaseButton
+               subscriptionTierId={tier.id}
+               price={tier.price}
+               currency={tier.currency}
+               clientUuid={clientUuid}
+               paymentUrl={tier.paymentUrl}
+               disabled={!canPurchase}
+               disabledReason={!canPurchase ? purchaseDisabledReason : undefined}
+             />
           </div>
         </div>
       ))}
