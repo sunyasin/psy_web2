@@ -1,10 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { loadPlannerStages, updatePlannerStep } from "../actions";
 import { computeProgress } from "@/lib/plannerProgress";
-import type { PlannerStageWithSteps, PlannerStatus, PlannerStepRow } from "@/lib/types";
+import { extractShortResponse } from "@/lib/short-analysis";
+import { hasStrategyDetails, StrategyDetails } from "@/components/strategy-details";
+import type { NewStage, NewStrategy, PlannerStageWithSteps, PlannerStatus, PlannerStepRow } from "@/lib/types";
 
 const statusLabels: Record<PlannerStatus, string> = {
   planned: "Запланирован",
@@ -28,6 +30,42 @@ function isEditable(step: PlannerStepRow): boolean {
   return editableStatuses.includes(step.status);
 }
 
+/** Раскрывающийся блок с деталями выбранной стратегии из анализа модели. */
+function AnalysisDetails({ strategy }: { strategy: NewStrategy }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-950">
+      <button
+        type="button"
+        onClick={() => setExpanded((prev) => !prev)}
+        aria-expanded={expanded}
+        className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left"
+      >
+        <span className="text-xs uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+          Детали анализа
+        </span>
+        <span className="flex items-center gap-1 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+          {expanded ? "Скрыть" : "Показать"}
+          <svg
+            className={`h-4 w-4 transition-transform ${expanded ? "rotate-180" : ""}`}
+            viewBox="0 0 20 20"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01-.02-1.06z" />
+          </svg>
+        </span>
+      </button>
+      {expanded && (
+        <div className="border-t border-zinc-200 p-4 dark:border-zinc-700">
+          <StrategyDetails strategy={strategy} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlannerGoalContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -46,6 +84,11 @@ function PlannerGoalContent() {
   const [draftProgress, setDraftProgress] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Детали стратегии из анализа модели: ключ этапа планировщика.
+  const [strategyDetails, setStrategyDetails] = useState<Record<string, NewStrategy | null>>({});
+  const analysisCache = useRef<Map<string, NewStage[]>>(new Map());
+  const requestedAnalyses = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!clientUuid) {
@@ -72,6 +115,61 @@ function PlannerGoalContent() {
       cancelled = true;
     };
   }, [clientUuid, goalId]);
+
+  // Подтягиваем ответ модели для анализа, из которого собраны этапы,
+  // и находим в нём именно ту стратегию, что выбрана для этапа.
+  useEffect(() => {
+    if (!clientUuid || stages.length === 0) return;
+
+    let cancelled = false;
+    const pending = stages.filter(
+      (stage) => stage.analysis_id && !(stage.id in strategyDetails)
+    );
+    if (pending.length === 0) return;
+
+    (async () => {
+      const resolved: Record<string, NewStrategy | null> = {};
+      for (const stage of pending) {
+        const analysisId = stage.analysis_id as string;
+        let parsedStages = analysisCache.current.get(analysisId);
+        if (!parsedStages) {
+          if (requestedAnalyses.current.has(analysisId)) continue;
+          requestedAnalyses.current.add(analysisId);
+          try {
+            const response = await fetch(
+              `/api/analysis/get?id=${encodeURIComponent(analysisId)}&client_uuid=${encodeURIComponent(clientUuid)}`
+            );
+            if (!response.ok) throw new Error("Анализ не найден");
+            const payload = await response.json();
+            const parsed = extractShortResponse(payload.analysis?.model_json);
+            parsedStages = parsed ? parsed.stages : [];
+            analysisCache.current.set(analysisId, parsedStages);
+          } catch (err) {
+            console.error("[planner/goal] не удалось загрузить анализ:", err);
+            analysisCache.current.set(analysisId, []);
+            parsedStages = [];
+          }
+        }
+        // Сначала ищем стратегию в её этапе, иначе — по названию в любом этапе анализа.
+        const inSameStage = parsedStages[stage.idea_index ?? 0]?.strategies
+          .find((item) => item.name === stage.strategy_title);
+        const anywhere = parsedStages
+          .flatMap((item) => item.strategies)
+          .find((item) => item.name === stage.strategy_title);
+        resolved[stage.id] = inSameStage ?? anywhere ?? null;
+      }
+      if (!cancelled && Object.keys(resolved).length > 0) {
+        setStrategyDetails((prev) => ({ ...prev, ...resolved }));
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // strategyDetails в зависимостях не нужен: он только защита от повторных запросов,
+    // а фактический триггер — список этапов.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientUuid, stages]);
 
   useEffect(() => {
     if (!activeStep) return;
@@ -244,6 +342,10 @@ function PlannerGoalContent() {
             <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
               План: {stage.planned_days || "—"} дней · Шагов: {stage.steps.length}
             </p>
+
+            {strategyDetails[stage.id] && hasStrategyDetails(strategyDetails[stage.id] as NewStrategy) && (
+              <AnalysisDetails strategy={strategyDetails[stage.id] as NewStrategy} />
+            )}
 
             <div className="mt-4 space-y-2">
               {stage.steps.length === 0 && (

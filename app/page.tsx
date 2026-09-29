@@ -70,10 +70,10 @@ export default function Home() {
             <div className="flex items-start gap-3">
               <div className="flex-1 text-center">
                 <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">
-                  {displayName ? `${displayName}. ` : ""}Расскажи, что привело тебя сюда сегодня
+                  Привет {displayName ? `, ${displayName}` : ""} ! Что хочешь попробовать сегодня?
                 </h1>
                 <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-                  Выбери, что ближе, или опиши своими словами
+                  
                 </p>
               </div>
               <button

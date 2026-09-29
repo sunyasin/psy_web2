@@ -1,8 +1,46 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
-import type { ShortAnalysisResult, ShortAnalysisStep, ShortAnalysisStrategy } from "@/lib/types";
+import type { NewStage, NewStep, NewStrategy, NewTimeToLaunch } from "@/lib/types";
+import { parseShortResponse } from "@/lib/short-analysis";
 import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers, type AnswerItem } from "@/lib/interview-prompt";
+
+function stripCodeFence(value: string): string {
+  return value.replace(/```json\n?|\n?```/g, "").trim();
+}
+
+function generateFallbackStrategies(profileText: string): NewStage[] {
+  const target = profileText.split(/[.!?\n]/).find((part) => part.trim().length > 20)?.trim();
+  const timeToLaunch: NewTimeToLaunch = {
+    days_to_first_step: 1,
+    days_to_result: 9,
+    note: "Сроки ориентировочные, реальные даты зависят от загрузки.",
+  };
+  const steps: NewStep[] = [
+    { number: 1, title: "Сформулировать первый результат", duration: "1 день", estimated_days: 1, description: "Определить минимальный измеримый результат на ближайшие 7 дней." },
+    { number: 2, title: "Составить план на неделю", duration: "1 день", estimated_days: 1, description: "Распределить действия по дням и определить время на каждый." },
+    { number: 3, title: "Выполнить и зафиксировать результат", duration: "1 неделя", estimated_days: 7, description: "Сделать первый шаг и записать, что получилось." },
+  ];
+  const strategy: NewStrategy = {
+    name: "Пошаговый эксперимент",
+    approach: "Разбейте цель на короткие проверяемые шаги и идите по ним в спокойном темпе.",
+    resources: [],
+    support: [],
+    steps,
+    time_to_launch: timeToLaunch,
+    timeline: "Первый результат — в течение недели, завершение этапа — примерно за 9 дней.",
+    budget: "Бюджет не оценён: в ответах нет данных о затратах.",
+    investment: "Время и внимание: около часа в день.",
+    avoid: [{ rule: "Не планировать вместо действия", reason: "Планы без первых шагов не дают обратной связи." }],
+    assumptions: ["Оценка построена по краткому описанию цели, детали могут отличаться."],
+  };
+  return [{
+    number: 1,
+    name: target || "Путь к цели",
+    description: "Базовый сценарий: последовательные маленькие шаги с фиксацией результата.",
+    strategies: [strategy],
+  }];
+}
 
 export async function GET(request: Request) {
   try {
@@ -39,15 +77,19 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Short interview prompt not found" }, { status: 404 });
     }
 
+    const shortSessions = (sessions || []).filter(
+      (session) => session.interview_id === shortInterview.id
+    );
+
     const rawAnswers: Record<string, Record<string, string>> = {};
     const answerItems: AnswerItem[] = [];
     let goalAnswer = "";
-    for (const [sessionIndex, session] of sessions.entries()) {
+    for (const [sessionIndex, session] of shortSessions.entries()) {
       const items = flattenAnswers(session.answers, session.interview_id as string);
       if (items.length === 0) continue;
       rawAnswers[`session_${sessionIndex + 1}`] = {};
       for (const item of items) {
-        if (!goalAnswer && session.interview_id === shortInterview.id) goalAnswer = item.answer;
+        if (!goalAnswer) goalAnswer = item.answer;
         rawAnswers[`session_${sessionIndex + 1}`][`${item.block}.${item.order}`] = item.answer;
         answerItems.push(item);
       }
@@ -56,15 +98,15 @@ export async function GET(request: Request) {
     const flatAnswers = answerItems.map((item) => item.answer);
 
     if (flatAnswers.length === 0) {
-      return NextResponse.json({ error: "No answers found in completed interviews" }, { status: 404 });
+      return NextResponse.json({ error: "No answers found in completed short interview" }, { status: 404 });
     }
 
     const profileText = flatAnswers.join(" ").toLowerCase();
-    const questionIndex = await loadQuestionIndex(interviewIds);
+    const questionIndex = await loadQuestionIndex([shortInterview.id]);
     const promptText = formatNumberedQA(numberAnswers(answerItems, questionIndex));
-    let strategies: ShortAnalysisResult[] = [];
+    let stages: NewStage[] = [];
     let modelUsed = "fallback";
-    let modelJson: any = null;
+    let modelJson: unknown = null;
 
     if (claudeConfigured()) {
       try {
@@ -74,30 +116,31 @@ export async function GET(request: Request) {
           { max_tokens: 10000, temperature: 0.7 }
         );
         modelJson = { raw_response: response };
-        strategies = normalizeStrategies(JSON.parse(stripCodeFence(response)));
-        if (strategies.length > 0) modelUsed = "claude";
+        const parsed = parseShortResponse(JSON.parse(stripCodeFence(response)));
+        stages = parsed ? parsed.stages : [];
+        if (stages.length > 0) modelUsed = "claude";
       } catch (err) {
         console.error("[analysis/short] Claude call failed, using fallback:", err);
-        strategies = [];
+        stages = [];
         modelJson = { error: err instanceof Error ? err.message : "Unknown error" };
       }
     }
 
-    if (!strategies || strategies.length === 0) {
-      console.error("[analysis/short] no usable model strategies, falling back", {
+    if (stages.length === 0) {
+      console.error("[analysis/short] no usable model stages, falling back", {
         claudeConfigured: claudeConfigured(),
         modelUsed,
       });
-      strategies = generateFallbackStrategies(profileText);
+      stages = generateFallbackStrategies(profileText);
       modelUsed = "fallback";
-      modelJson = { strategies, fallback: true };
+      modelJson = { stages, fallback: true };
     }
 
     const { data: analysis, error: analysisError } = await supabase
       .from("interview_analyses")
       .insert({
         client_uuid: clientUuid,
-        interview_session_id: sessions[sessions.length - 1].id,
+        interview_session_id: shortSessions[shortSessions.length - 1]?.id,
         interview_id: shortInterview.id,
         raw_answers: rawAnswers,
         goal_answer: goalAnswer,
@@ -112,7 +155,7 @@ export async function GET(request: Request) {
     }
 
     return NextResponse.json({
-      strategies,
+      stages,
       answerCount: flatAnswers.length,
       analysis_id: analysis.id,
     });
@@ -122,178 +165,4 @@ export async function GET(request: Request) {
       { status: 400 }
     );
   }
-}
-
-function stripCodeFence(value: string): string {
-  return value.replace(/```json\n?|\n?```/g, "").trim();
-}
-
-const STRATEGY_KEYS = ["strategies", "Стратегии", "plan", "план", "steps", "шаги"];
-const STRATEGY_NAME_KEYS = ["name", "title", "название", "имя", "стратегия"];
-const STEP_TITLE_KEYS = ["title", "step", "name", "название", "задача", "шаг", "действие"];
-const STEP_DAYS_KEYS = ["estimated_days", "days", "срок", "дней", "duration", "estimate"];
-const STEP_DESCRIPTION_KEYS = ["description", "detail", "details", "описание", "пояснение"];
-
-function readString(source: Record<string, unknown>, keys: string[]): string {
-  for (const key of keys) {
-    const value = source[key];
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "";
-}
-
-function readDays(source: Record<string, unknown>): number {
-  for (const key of STEP_DAYS_KEYS) {
-    const value = source[key];
-    const parsed = typeof value === "string" ? Number.parseInt(value, 10) : Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) return Math.min(Math.round(parsed), 3650);
-  }
-  return 0;
-}
-
-function readSteps(source: unknown): ShortAnalysisStep[] {
-  if (typeof source === "string") {
-    const lines = source.split(/\r?\n|(?<=[.;])\s+/).map((line) => line.replace(/^[\s\-–—•*\d.)\]]+/, "").trim()).filter(Boolean);
-    const items = lines.length > 0 ? lines : [source.trim()];
-    return items.map((text, index) => ({
-      step: index + 1,
-      title: text.length > 80 ? `${text.slice(0, 80).trim()}…` : text,
-      description: text,
-      estimated_days: 0,
-    }));
-  }
-  if (!Array.isArray(source)) return [];
-
-  return source.flatMap((rawStep, index) => {
-    if (typeof rawStep === "string") {
-      const text = rawStep.trim();
-      if (!text) return [];
-      return [{
-        step: index + 1,
-        title: text.length > 80 ? `${text.slice(0, 80).trim()}…` : text,
-        description: text,
-        estimated_days: 0,
-      }];
-    }
-    if (!rawStep || typeof rawStep !== "object") return [];
-    const step = rawStep as Record<string, unknown>;
-    const title = readString(step, STEP_TITLE_KEYS);
-    if (!title) return [];
-    return [{
-      step: index + 1,
-      title,
-      description: readString(step, STEP_DESCRIPTION_KEYS),
-      estimated_days: readDays(step),
-    }];
-  });
-}
-
-function stepsFromDescription(description: string): ShortAnalysisStep[] {
-  const sentences = description
-    .split(/(?<=[.!?…])\s+/)
-    .map((sentence) => sentence.replace(/^[\s•*\-–—]+/, "").trim())
-    .filter((sentence) => sentence.length > 15);
-
-  const picked = (sentences.length > 0 ? sentences : [description.trim()])
-    .slice(0, 5)
-    .filter(Boolean);
-
-  return picked.map((text, index) => ({
-    step: index + 1,
-    title: text.length > 80 ? `${text.slice(0, 80).trim()}…` : text,
-    description: text,
-    estimated_days: index === 0 ? 3 : 7,
-  }));
-}
-
-function normalizeStrategies(value: unknown): ShortAnalysisResult[] {
-  // The model may return a single idea, an object with an "ideas"/"идеи" key, or an array
-  const rawList = Array.isArray(value)
-    ? value
-    : (() => {
-        if (value && typeof value === "object") {
-          const container = value as Record<string, unknown>;
-          for (const key of ["ideas", "идеи", "strategies", "Стратегии", "results", "data"]) {
-            if (Array.isArray(container[key])) return container[key];
-          }
-        }
-        return [value];
-      })();
-
-  const result: ShortAnalysisResult[] = [];
-  let synthesized = 0;
-
-  for (const rawIdea of rawList) {
-    if (!rawIdea || typeof rawIdea !== "object") continue;
-    const idea = rawIdea as Record<string, unknown>;
-    const title = readString(idea, ["title", "name", "заголовок", "идея", "тема"]);
-    const description = readString(idea, ["description", "описание", "detail", "details", "текст"]);
-    if (!title && !description) continue;
-
-    const ideaStrategies: ShortAnalysisStrategy[] = [];
-
-    for (const key of STRATEGY_KEYS) {
-      const strategySource = idea[key];
-      if (!strategySource || typeof strategySource !== "object") continue;
-
-      if (Array.isArray(strategySource)) {
-        // Either a list of steps directly, or a list of {name, steps} objects
-        const firstObject = strategySource.find((item) => item && typeof item === "object" && !Array.isArray(item)) as Record<string, unknown> | undefined;
-        const named = firstObject ? readString(firstObject, STRATEGY_NAME_KEYS) : "";
-        const stepsSource = named ? strategySource : [strategySource];
-        const steps = readSteps(stepsSource);
-        if (steps.length > 0) {
-          ideaStrategies.push({
-            name: named || readString(idea, STRATEGY_NAME_KEYS) || `Стратегия ${ideaStrategies.length + 1}`,
-            steps,
-          });
-        }
-        continue;
-      }
-
-      // Object form: { "название стратегии": steps }
-      for (const [name, stepsSource] of Object.entries(strategySource as Record<string, unknown>)) {
-        const steps = readSteps(stepsSource);
-        if (steps.length > 0) ideaStrategies.push({ name: name.trim() || `Стратегия ${ideaStrategies.length + 1}`, steps });
-      }
-    }
-
-    // Model returned an idea without a plan: keep it and derive a plan from the description
-    if (ideaStrategies.length === 0 && description) {
-      const steps = stepsFromDescription(description);
-      if (steps.length > 0) {
-        ideaStrategies.push({ name: "Пошаговый план", steps });
-        synthesized += 1;
-      }
-    }
-
-    if (ideaStrategies.length === 0) {
-      console.error("[analysis/short] idea dropped: no title/description/strategies", JSON.stringify(idea).slice(0, 300));
-      continue;
-    }
-
-    result.push({ title: title || description.slice(0, 60), description, strategies: ideaStrategies });
-  }
-
-  if (synthesized > 0) {
-    console.error(`[analysis/short] synthesized plans for ${synthesized} idea(s) from description text`);
-  }
-
-  return result.slice(0, 5);
-}
-
-function generateFallbackStrategies(profileText: string): ShortAnalysisResult[] {
-  const target = profileText.split(/[.!?\n]/).find((part) => part.trim().length > 20)?.trim();
-  return [{
-    title: target || "Цель и стратегия её достижения",
-    description: "Разбейте цель на последовательность проверяемых действий и выберите реалистичный темп.",
-    strategies: [{
-      name: "Пошаговый эксперимент",
-      steps: [
-        { step: 1, title: "Сформулировать первый результат", description: "Определить минимальный измеримый результат на ближайшие 7 дней.", estimated_days: 1 },
-        { step: 2, title: "Составить план на неделю", description: "Распределить действия по дням и определить время на каждый.", estimated_days: 1 },
-        { step: 3, title: "Выполнить и зафиксировать результат", description: "Сделать первый шаг и записать, что получилось.", estimated_days: 7 },
-      ],
-    }],
-  }];
 }

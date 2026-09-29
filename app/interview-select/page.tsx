@@ -31,9 +31,7 @@ export default function InterviewSelectPage() {
   const [clientUuid] = useState<string | null>(() => typeof window === "undefined" ? null : localStorage.getItem("client_uuid"));
   const [displayName] = useState<string | null>(() => typeof window === "undefined" ? null : localStorage.getItem("display_name"));
   const [loading, setLoading] = useState(true);
-  const [fullCompleted, setFullCompleted] = useState(false);
   const [shortCompleted, setShortCompleted] = useState(false);
-  const [fullInProgress, setFullInProgress] = useState(false);
   const [shortInProgress, setShortInProgress] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -56,13 +54,10 @@ export default function InterviewSelectPage() {
       return;
     }
     Promise.all([
-      fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=default`).then((response) => response.json()),
       fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=short`).then((response) => response.json()),
       fetch(`/api/analysis/exists?client_uuid=${clientUuid}`).then((response) => response.json()),
-    ]).then(([fullData, shortData, analysisData]) => {
-      setFullCompleted(Boolean(fullData.completed));
+    ]).then(([shortData, analysisData]) => {
       setShortCompleted(Boolean(shortData.completed));
-      setFullInProgress(Boolean(fullData.in_progress));
       setShortInProgress(Boolean(shortData.in_progress));
       setHasAnalysis(Boolean(analysisData.has_analysis));
       setAnalysisCreatedAt(analysisData.created_at ?? null);
@@ -70,7 +65,7 @@ export default function InterviewSelectPage() {
       .finally(() => setLoading(false));
   }, [clientUuid]);
 
-  function startInterview(code: "default" | "short") {
+  function startInterview(code: "short") {
     if (!clientUuid) {
       setError("Сессия не найдена. Вернитесь на главную.");
       return;
@@ -100,15 +95,6 @@ export default function InterviewSelectPage() {
     };
 
     try {
-      if (fullCompleted && shortCompleted) {
-        const response = await fetch(`/api/analysis/short?client_uuid=${encodeURIComponent(clientUuid)}`);
-        const payload = await response.json();
-        if (!response.ok) throw new Error(payload.error || "Ошибка анализа");
-        setAnalysisStage("Готовим результат");
-        await waitFor(1500);
-        window.location.href = `/short-analysis?client_uuid=${encodeURIComponent(clientUuid)}`;
-        return;
-      }
       if (shortCompleted) {
         const response = await fetch(`/api/analysis/short?client_uuid=${encodeURIComponent(clientUuid)}`);
         const payload = await response.json();
@@ -136,17 +122,10 @@ export default function InterviewSelectPage() {
       <main className="w-full max-w-lg space-y-6">
         <div className="text-center">
           <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">{displayName ? `${displayName}. ` : ""}Выбери формат интервью</h1>
-          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">Полное интервью исследует биографию, а короткое — одну цель или идею и строит стратегию достижения.</p>
+          <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">Короткое интервью исследует одну цель или идею и строит стратегию её достижения.</p>
         </div>
         {error && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{error}</p>}
         <div className="space-y-3">
-          <button type="button" onClick={() => startInterview("default")} className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white">
-            <span className="flex items-center gap-2">
-              {fullCompleted && <CompletedCheck />}
-              <span className="text-base font-semibold">Полное интервью (6 блоков, 70 вопросов)</span>
-            </span>
-            <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">Глубокое исследование биографии, экспертизы и ресурсов {fullCompleted ? "· пройдено" : fullInProgress ? "· в процессе" : ""}</span>
-          </button>
           <button type="button" onClick={() => startInterview("short")} className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white">
             <span className="flex items-center gap-2">
               {shortCompleted && <CompletedCheck />}
@@ -157,7 +136,7 @@ export default function InterviewSelectPage() {
           <button
             type="button"
             onClick={hasAnalysis ? openAnalysisResults : analyze}
-            disabled={analyzing || (!hasAnalysis && !fullCompleted && !shortCompleted)}
+             disabled={analyzing || (!hasAnalysis && !shortCompleted)}
             className="w-full rounded-md bg-black px-4 py-4 text-left text-sm font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
           >
             <span className="block text-base font-semibold">
@@ -166,9 +145,7 @@ export default function InterviewSelectPage() {
             <span className="mt-1 block text-xs text-zinc-300 dark:text-zinc-500">
               {hasAnalysis
                 ? `Стратегии и шаги по твоим ответам${analysisCreatedAt ? ` от ${formatAnalysisDate(analysisCreatedAt)}` : ""}`
-                : fullCompleted && shortCompleted
-                  ? "Все ответы двух интервью попадут в анализ стратегии"
-                  : "Получить стратегии и шаги"}
+                : "Получить стратегии и шаги"}
             </span>
           </button>
         </div>
