@@ -257,6 +257,43 @@ export interface InterviewAnalysisRow {
   interview_id?: string | null;
   interview_name?: string | null;
   session_status?: string | null;
+  kind?: string | null;
+}
+
+export interface ModelIdea {
+  title: string;
+  description: string;
+  quotes: string[];
+  why_you: string;
+  first_step: {
+    action: string;
+    days_to_first_test: number;
+    difficulty: "low" | "medium" | "hard";
+    resources: string[];
+  };
+  similar_cases: {
+    name: string;
+    similarity: string;
+    approach: string;
+  }[];
+  market: {
+    overview: string;
+    competitors: {
+      name: string;
+      note: string;
+    }[];
+    helpers: {
+      name: string;
+      how_helps: string;
+    }[];
+  };
+  risks: {
+    financial: string[];
+    psychological: string[];
+    physical: string[];
+    other: string[];
+  };
+  tags?: string[];
 }
 
 export interface GoalRow {
@@ -361,5 +398,64 @@ export interface PlannerGoalSummary {
   progress_percent: number;
   idea_index: number | null;
   updated_at: string | null;
+}
+
+export interface NewResource {
+  category: string;
+  items: string[];
+  rationale: string;
+}
+
+export interface NewSupport {
+  who: string;
+  needed: boolean;
+  description: string;
+}
+
+export interface NewStep {
+  number: number;
+  title: string;
+  duration: string;
+  estimated_days: number;
+  description: string;
+}
+
+export interface NewTimeToLaunch {
+  days_to_first_step: number;
+  days_to_result: number;
+  note: string;
+}
+
+export interface NewAvoid {
+  rule: string;
+  reason: string;
+}
+
+export interface NewStrategy {
+  name: string;
+  approach: string;
+  resources: NewResource[];
+  support: NewSupport[];
+  steps: NewStep[];
+  time_to_launch: NewTimeToLaunch;
+  timeline: string;
+  budget: string;
+  investment: string;
+  avoid: NewAvoid[];
+  assumptions: string[];
+}
+
+export interface NewStage {
+  number: number;
+  name: string;
+  description: string;
+  strategies: NewStrategy[];
+}
+
+export interface NewResponse {
+  title: string;
+  description: string;
+  tags: string[];
+  stages: NewStage[];
 }
 

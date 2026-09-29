@@ -26,24 +26,6 @@ export default function Welcome() {
     }
   }, []);
 
-  useEffect(() => {
-    const trimmedName = name.trim();
-    const trimmedEmail = email.trim();
-    if (!trimmedName || !trimmedEmail) {
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      lookupSession(trimmedName, trimmedEmail, controller.signal);
-    }, 500);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [name, email]);
-
   async function lookupSession(
     displayName: string,
     lookupEmail: string,
@@ -80,6 +62,24 @@ export default function Welcome() {
       setLookupLoading(false);
     }
   }
+
+  useEffect(() => {
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+    if (!trimmedName || !trimmedEmail) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      lookupSession(trimmedName, trimmedEmail, controller.signal);
+    }, 500);
+
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [name, email]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

@@ -17,6 +17,10 @@ export default function InterviewPage() {
   const [analysisProgress, setAnalysisProgress] = useState<string>("");
   const [restarting, setRestarting] = useState(false);
   const [resolvedInterviewId, setResolvedInterviewId] = useState<string | null>(null);
+  const [selectedCode] = useState<string | null>(
+    () => (typeof window !== "undefined" ? localStorage.getItem("selected_interview_code") : null)
+  );
+  const [hasShortAnalysis, setHasShortAnalysis] = useState<boolean | null>(null);
 
   useEffect(() => {
     const clientUuid = localStorage.getItem("client_uuid");
@@ -83,6 +87,52 @@ export default function InterviewPage() {
         .catch((err) => console.error("Failed to load answers", err));
     }
   }, [allQuestions, question]);
+
+  useEffect(() => {
+    const q = question;
+    if (!q?.completed) return;
+
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid) return;
+
+    if (selectedCode !== "short") return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/short-analysis?client_uuid=${encodeURIComponent(clientUuid)}`
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          setHasShortAnalysis(false);
+          return;
+        }
+        const payload = await res.json();
+        if (cancelled) return;
+        const has =
+          payload.analysis &&
+          Array.isArray(payload.ideas) &&
+          payload.ideas.length > 0;
+        setHasShortAnalysis(!!has);
+      } catch {
+        if (!cancelled) setHasShortAnalysis(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [question, selectedCode]);
+
+  useEffect(() => {
+    if (selectedCode !== "short" || !question?.completed || !hasShortAnalysis) return;
+
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (clientUuid) {
+      window.location.href = `/short-analysis?client_uuid=${encodeURIComponent(clientUuid)}`;
+    }
+  }, [hasShortAnalysis, question?.completed, selectedCode]);
 
   async function handleSave() {
     if (!answer.trim() || !question) return;
@@ -574,45 +624,47 @@ async function handleForward() {
             </div>
           )}
 
-          <div className="flex gap-2">
-            <button
-              onClick={handleSkipUnanswered}
-              disabled={sending}
-              className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-            >
-              В конец
-            </button>
-            <button
-              onClick={handleBack}
-              disabled={sending || !hasPreviousQuestion()}
-              className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-            >
-              Назад
-            </button>
-            {!question.completed && (
+          {!(question?.completed && selectedCode === "short" && hasShortAnalysis === false) && (
+            <div className="flex gap-2">
               <button
-                onClick={handleSave}
-                disabled={sending || !answer.trim()}
+                onClick={handleSkipUnanswered}
+                disabled={sending}
                 className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
               >
-                {sending ? "Сохраняю..." : "Сохранить"}
+                В конец
               </button>
-            )}
-            <button
-              onClick={handleForward}
-              disabled={sending || !hasNextQuestion()}
-              className="flex-1 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
-            >
-              Вперед
-            </button>
-            <button
-              onClick={handleSkipUnanswered}
-              disabled={sending}
-              className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
-            >
-              В конец
-            </button>
-          </div>
+              <button
+                onClick={handleBack}
+                disabled={sending || !hasPreviousQuestion()}
+                className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+              >
+                Назад
+              </button>
+              {!question.completed && (
+                <button
+                  onClick={handleSave}
+                  disabled={sending || !answer.trim()}
+                  className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+                >
+                  {sending ? "Сохраняю..." : "Сохранить"}
+                </button>
+              )}
+              <button
+                onClick={handleForward}
+                disabled={sending || !hasNextQuestion()}
+                className="flex-1 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-white dark:text-black dark:hover:bg-zinc-200"
+              >
+                Вперед
+              </button>
+              <button
+                onClick={handleSkipUnanswered}
+                disabled={sending}
+                className="flex-1 rounded-md border border-zinc-200 bg-white px-4 py-2 text-sm font-medium text-black transition-colors hover:border-black disabled:opacity-50 disabled:cursor-not-allowed dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white"
+              >
+                В конец
+              </button>
+            </div>
+          )}
 
           {question.completed && (
             <div className="space-y-2">

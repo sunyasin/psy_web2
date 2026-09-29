@@ -64,7 +64,7 @@ export const CBT_SYSTEM_PROMPT = `Ты — помощник по когнити�
 export async function callClaude(
   messages: LlmMessage[],
   system: string,
-  opts: { max_tokens?: number; temperature?: number } = {}
+  opts: { max_tokens?: number; temperature?: number; stream?: boolean } = {}
 ): Promise<string> {
   const model = resolveModel();
 
@@ -105,18 +105,22 @@ export async function callClaude(
       ...preparedMessages.map((m) => ({ role: m.role, content: m.text })),
     ],
   };
-  // max_tokens/temperature не подставляем по умолчанию: у OpenRouter это необязательные
+  // max_tokens/temperature/stream не подставляем по умолчанию: у OpenRouter это необязательные
   // поля, а дефолт 1024 молча обрезал длинные ответы.
   if (opts.max_tokens != null) body.max_tokens = opts.max_tokens;
+  else body.max_tokens = 30000;
   if (opts.temperature != null) body.temperature = opts.temperature;
+  if (opts.stream != null) body.stream = opts.stream;
+  else body.stream = true;
   if (reasoningEnabled()) body.reasoning = { enabled: true };
 
   console.log("[claude] calling OpenRouter", {
     endpoint,
     model,
     messageCount: preparedMessages.length,
-    max_tokens: opts.max_tokens,
-    temperature: opts.temperature,
+    max_tokens: body.max_tokens,
+    temperature: body.temperature,
+    stream: body.stream,
   });
 
   const response = await fetch(endpoint, {
@@ -137,6 +141,19 @@ export async function callClaude(
   }
 
   let payload: { choices?: Array<{ message?: { content?: unknown } }> };
+  if (body.stream) {
+    const text = parseSseStream(raw);
+    if (!text) {
+      throw new Error(`OpenRouter stream returned no text content: ${raw.slice(0, 300)}`);
+    }
+    console.log("[claude] OpenRouter stream response received", {
+      model,
+      textLength: text.length,
+      textPreview: text.slice(0, 80),
+    });
+    return text;
+  }
+
   try {
     payload = JSON.parse(raw);
   } catch {
@@ -154,6 +171,26 @@ export async function callClaude(
     textPreview: text.slice(0, 80),
   });
   return text;
+}
+
+/** Парсит SSE-ответ OpenRouter, собирая текст из дельт content. */
+function parseSseStream(raw: string): string {
+  let text = "";
+  for (const line of raw.split("\n")) {
+    if (!line.startsWith("data: ")) continue;
+    const data = line.slice(6).trim();
+    if (data === "[DONE]") break;
+    let chunk: { choices?: Array<{ delta?: { content?: unknown } }> };
+    try {
+      chunk = JSON.parse(data);
+    } catch {
+      continue;
+    }
+    const delta = chunk?.choices?.[0]?.delta;
+    if (!delta) continue;
+    text += extractText(delta.content);
+  }
+  return text.trim();
 }
 
 /** Контент приходит строкой либо массивом частей `[{ type: "text", text }]`. */

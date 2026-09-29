@@ -88,21 +88,6 @@ export default function ShortAnalysisPage() {
     [data],
   );
 
-  function updateStep(strategy: Strategy, tracking: Tracking) {
-    const nextStatus = tracking.status === "selected" ? "pending" : "selected";
-    setData((current) => current ? {
-      ...current,
-      ideas: current.ideas.map((idea) => ({
-        ...idea,
-        strategies: idea.strategies.map((item) => ({
-          ...item,
-          is_selected: item.id === strategy.id ? true : item.is_selected,
-          tracking: item.tracking.map((step) => step.id === tracking.id ? { ...step, status: nextStatus } : step),
-        })),
-      })),
-    } : current);
-  }
-
   function toggleStrategy(strategy: Strategy) {
     const willSelect = !strategy.is_selected;
     setData((current) => {
@@ -193,25 +178,23 @@ export default function ShortAnalysisPage() {
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                   {idea.strategies.map((strategy) => {
-                    const completed = strategy.tracking.filter((item) => item.status === "selected").length;
                     return (
                       <div key={strategy.id} className={`rounded-xl border-2 p-4 cursor-pointer ${strategy.is_selected ? "border-black dark:border-white" : "border-zinc-200 dark:border-zinc-700"}`} onClick={() => toggleStrategy(strategy)}>
                         <div className="flex items-start justify-between gap-3">
                           <h3 className="font-medium text-black dark:text-zinc-50">{strategy.title}</h3>
                           {strategy.is_selected && <span className="rounded-full bg-black px-2 py-1 text-[10px] font-medium text-white dark:bg-white dark:text-black">Выбрана</span>}
                         </div>
-                        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">Шагов: {strategy.steps.length} · Выбрано: {completed}</p>
+                        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">Шагов: {strategy.steps.length}</p>
                         <div className="mt-4 space-y-2">
-                          {strategy.steps.map((step, index) => {
-                            const tracking = strategy.tracking.find((item) => item.step_index === index);
-                            const status = tracking?.status || "pending";
-                            return (
-                              <button key={`${strategy.id}-${index}`} type="button" onClick={(e) => { e.stopPropagation(); if (tracking) updateStep(strategy, tracking); }} className={`flex w-full cursor-pointer items-start gap-3 rounded-lg border-2 p-3 text-left ${strategy.is_selected ? "border-black dark:border-white" : "border-zinc-200 dark:border-zinc-700"} ${status === "selected" ? "bg-green-50 dark:bg-green-950" : ""} hover:border-zinc-500`}>
-                                <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-xs ${status === "selected" ? "border-green-600 bg-green-600 text-white" : "border-zinc-400 text-zinc-400"}`}>{status === "selected" ? "✓" : index + 1}</span>
-                                <span className="min-w-0 flex-1"><span className={`block text-sm ${status === "selected" ? "text-zinc-800 dark:text-zinc-200" : "text-zinc-700 dark:text-zinc-200"}`}>{step.title}</span>{step.description && <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">{step.description}</span>}<span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">{status === "selected" ? "Выбран" : "Не выбран"}</span></span>
-                              </button>
-                            );
-                          })}
+                          {strategy.steps.map((step, index) => (
+                            <div key={`${strategy.id}-${index}`} className="flex w-full items-start gap-3 rounded-lg border-2 border-zinc-200 p-3 text-left dark:border-zinc-700">
+                              <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-400 text-xs text-zinc-400">{index + 1}</span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block text-sm text-zinc-700 dark:text-zinc-200">{step.title}</span>
+                                {step.description && <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">{step.description}</span>}
+                              </span>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     );

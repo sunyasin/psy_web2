@@ -2,21 +2,31 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import type { Idea, GoalRow } from "@/lib/types";
+import type { Idea, GoalRow, ModelIdea, NewResponse } from "@/lib/types";
 
 type DecomposeStep = {
-  step: number;
+  number: number;
   title: string;
-  description: string;
+  duration: string;
   estimated_days: number;
+  description: string;
 };
 
 type DecomposeStrategy = {
   id: string;
   idea_index: number;
   strategy_index: number;
-  title: string;
+  name: string;
+  approach: string;
+  resources: { category: string; items: string[]; rationale: string }[];
+  support: { who: string; needed: boolean; description: string }[];
   steps: DecomposeStep[];
+  time_to_launch: { days_to_first_step: number; days_to_result: number; note: string };
+  timeline: string;
+  budget: string;
+  investment: string;
+  avoid: { rule: string; reason: string }[];
+  assumptions: string[];
 };
 
 type DecomposeIdea = {
@@ -25,12 +35,6 @@ type DecomposeIdea = {
   title: string;
   description: string | null;
   strategies: DecomposeStrategy[];
-};
-
-type DecomposePayload = {
-  analysis: { id: string; goal_answer: string | null; answer_count: number } | null;
-  ideas: DecomposeIdea[];
-  plannedIdeas: PlannedIdeaInfo[];
 };
 
 type PlannedIdeaInfo = { title: string; stageCount: number };
@@ -69,10 +73,12 @@ export default function IdeaPage() {
   const [decomposeAnalysisId, setDecomposeAnalysisId] = useState<string | null>(null);
   const [decomposeError, setDecomposeError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<number, number>>({});
+  const [expandedStrategy, setExpandedStrategy] = useState<{ ideaIndex: number; strategyIndex: number } | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
   const [plannedGoals, setPlannedGoals] = useState<PlannedGoal[] | null>(null);
   const [plannedIdeas, setPlannedIdeas] = useState<PlannedIdeaInfo[]>([]);
   const [pendingSelections, setPendingSelections] = useState<PlanSelection[] | null>(null);
+  const [modelIdea, setModelIdea] = useState<ModelIdea | null>(null);
 
   useEffect(() => {
     const clientUuid = localStorage.getItem("client_uuid");
@@ -102,6 +108,40 @@ export default function IdeaPage() {
           if (match.conflict_analysis) {
             setSabotageResult(match.conflict_analysis);
           }
+          // Fetch model idea data from analysis if source_analysis_id exists
+          if (match.source_analysis_id) {
+            try {
+              const analysisRes = await fetch(`/api/analysis/get?id=${encodeURIComponent(match.source_analysis_id)}&client_uuid=${encodeURIComponent(clientUuid)}`);
+              if (analysisRes.ok) {
+                const analysisData = await analysisRes.json();
+                if (analysisData.analysis?.model_json) {
+                  const modelJson = analysisData.analysis.model_json;
+                  // Parse raw_response if present
+                  let ideas: ModelIdea[] = [];
+                  if (modelJson.raw_response) {
+                    try {
+                      const cleaned = modelJson.raw_response.replace(/```json\n?|\n?```/g, "").trim();
+                      const parsed = JSON.parse(cleaned);
+                      if (Array.isArray(parsed)) {
+                        ideas = parsed;
+                      }
+                    } catch (err) {
+                      console.error("Failed to parse model_json raw_response:", err);
+                    }
+                  } else if (Array.isArray(modelJson.ideas)) {
+                    ideas = modelJson.ideas;
+                  }
+                  // Find the idea matching the goal title
+                  const matchedIdea = ideas.find((mi) => mi.title === match.title);
+                  if (matchedIdea) {
+                    setModelIdea(matchedIdea);
+                  }
+                }
+              }
+            } catch (err) {
+              console.error("Failed to load model idea:", err);
+            }
+          }
         }
       } catch (err) {
         console.error("Failed to load goal:", err);
@@ -116,10 +156,39 @@ export default function IdeaPage() {
           `/api/analysis/decompose?client_uuid=${encodeURIComponent(clientUuid)}&goal_id=${encodeURIComponent(goalId)}`
         );
         if (!res.ok) return;
-        const payload = (await res.json()) as DecomposePayload;
-        setDecomposeAnalysisId(payload.analysis?.id ?? null);
-        setDecomposeIdeas(Array.isArray(payload.ideas) ? payload.ideas : []);
-        setPlannedIdeas(Array.isArray(payload.plannedIdeas) ? payload.plannedIdeas : []);
+        const newResponse = (await res.json()) as NewResponse;
+        setDecomposeAnalysisId(""); // analysis id not in new response
+        // Transform new response to UI format: each stage becomes a DecomposeIdea
+        const transformedIdeas: DecomposeIdea[] = (newResponse.stages || []).map((stage, stageIndex) => ({
+          id: `stage-${stage.number}`,
+          idea_index: stageIndex,
+          title: stage.name,
+          description: stage.description,
+          strategies: (stage.strategies || []).map((strategy, strategyIndex) => ({
+            id: `stage-${stage.number}-strategy-${strategyIndex}`,
+            idea_index: stageIndex,
+            strategy_index: strategyIndex,
+            name: strategy.name,
+            approach: strategy.approach,
+            resources: strategy.resources,
+            support: strategy.support,
+            steps: strategy.steps.map((step) => ({
+              number: step.number,
+              title: step.title,
+              duration: step.duration,
+              estimated_days: step.estimated_days,
+              description: step.description,
+            })),
+            time_to_launch: strategy.time_to_launch,
+            timeline: strategy.timeline,
+            budget: strategy.budget,
+            investment: strategy.investment,
+            avoid: strategy.avoid,
+            assumptions: strategy.assumptions,
+          })),
+        }));
+        setDecomposeIdeas(transformedIdeas);
+        setPlannedIdeas([]);
         setPlannedGoals(null);
       } catch (err) {
         console.error("Failed to load decomposition:", err);
@@ -228,10 +297,38 @@ export default function IdeaPage() {
         throw new Error(data.error || "Ошибка декомпозиции");
       }
 
-      const payload = data as DecomposePayload;
-      setDecomposeAnalysisId(payload.analysis?.id ?? null);
-      setDecomposeIdeas(Array.isArray(payload.ideas) ? payload.ideas : []);
-      setPlannedIdeas(Array.isArray(payload.plannedIdeas) ? payload.plannedIdeas : []);
+      const newResponse = data as NewResponse;
+      setDecomposeAnalysisId(""); // analysis id not in new response
+      const transformedIdeas: DecomposeIdea[] = (newResponse.stages || []).map((stage, stageIndex) => ({
+        id: `stage-${stage.number}`,
+        idea_index: stageIndex,
+        title: stage.name,
+        description: stage.description,
+        strategies: (stage.strategies || []).map((strategy, strategyIndex) => ({
+          id: `stage-${stage.number}-strategy-${strategyIndex}`,
+          idea_index: stageIndex,
+          strategy_index: strategyIndex,
+          name: strategy.name,
+          approach: strategy.approach,
+          resources: strategy.resources,
+          support: strategy.support,
+          steps: strategy.steps.map((step) => ({
+            number: step.number,
+            title: step.title,
+            duration: step.duration,
+            estimated_days: step.estimated_days,
+            description: step.description,
+          })),
+          time_to_launch: strategy.time_to_launch,
+          timeline: strategy.timeline,
+          budget: strategy.budget,
+          investment: strategy.investment,
+          avoid: strategy.avoid,
+          assumptions: strategy.assumptions,
+        })),
+      }));
+      setDecomposeIdeas(transformedIdeas);
+      setPlannedIdeas([]);
       setSelected({});
     } catch (err) {
       setDecomposeError(err instanceof Error ? err.message : "Ошибка соединения");
@@ -242,11 +339,12 @@ export default function IdeaPage() {
 
   const handleSelectStrategy = (ideaIndex: number, strategyIndex: number) => {
     setSelected((prev) => ({ ...prev, [ideaIndex]: strategyIndex }));
+    setExpandedStrategy({ ideaIndex, strategyIndex });
   };
 
   const handleDecomposePlan = async () => {
     const clientUuid = localStorage.getItem("client_uuid");
-    if (!clientUuid || !decomposeAnalysisId) return;
+    if (!clientUuid) return;
 
     const selections: PlanSelection[] = Object.entries(selected).map(([ideaIndex, strategyIndex]) => ({
       idea_index: Number(ideaIndex),
@@ -274,7 +372,7 @@ export default function IdeaPage() {
 
   const submitPlan = async (selections: PlanSelection[]) => {
     const clientUuid = localStorage.getItem("client_uuid");
-    if (!clientUuid || !decomposeAnalysisId) return;
+    if (!clientUuid) return;
 
     setPlanLoading(true);
     setDecomposeError(null);
@@ -285,7 +383,7 @@ export default function IdeaPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           client_uuid: clientUuid,
-          analysis_id: decomposeAnalysisId,
+          analysis_id: decomposeAnalysisId || "",
           selections,
         }),
       });
@@ -343,14 +441,106 @@ export default function IdeaPage() {
         `/api/analysis/decompose?client_uuid=${encodeURIComponent(clientUuid)}&goal_id=${encodeURIComponent(goalId)}`
       );
       if (!res.ok) return;
-      const payload = (await res.json()) as DecomposePayload;
-      setPlannedIdeas(Array.isArray(payload.plannedIdeas) ? payload.plannedIdeas : []);
+      const data = await res.json();
+      // Handle both old DecomposePayload and new NewResponse formats
+      const plannedIdeas = (data as { plannedIdeas?: PlannedIdeaInfo[] }).plannedIdeas;
+      setPlannedIdeas(Array.isArray(plannedIdeas) ? plannedIdeas : []);
     } catch (err) {
       console.error("Failed to reload planned ideas:", err);
     }
   };
 
   const ideaDescription = idea?.description || "";
+
+  const [expandedModelIdea, setExpandedModelIdea] = useState(false);
+
+  const formatQuotes = (quotes: string[]) => (
+    <div className="space-y-2">
+      {quotes.map((quote, idx) => (
+        <div key={idx} className="border-l-2 border-zinc-300 pl-3 text-sm text-zinc-700 italic dark:border-zinc-600 dark:text-zinc-300">
+          «{quote}»
+        </div>
+      ))}
+    </div>
+  );
+
+  const formatFirstStep = (firstStep: ModelIdea["first_step"]) => (
+    <div className="space-y-3">
+      <div>
+        <p className="font-medium text-zinc-900 dark:text-zinc-100">Действие</p>
+        <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">{firstStep.action}</p>
+      </div>
+      <div className="rounded-lg bg-zinc-50 p-4 dark:bg-zinc-800 space-y-2">
+        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          <span className="font-medium">Дней до теста:</span> {firstStep.days_to_first_test}
+        </p>
+        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          <span className="font-medium">Сложность:</span> {firstStep.difficulty}
+        </p>
+        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+          <span className="font-medium">Ресурсы:</span> {firstStep.resources.join(", ") || "—"}
+        </p>
+      </div>
+    </div>
+  );
+
+  const formatSimilarCases = (cases: ModelIdea["similar_cases"]) => (
+    <div className="space-y-3">
+      {cases.map((c, idx) => (
+        <div key={idx} className="rounded-lg border border-zinc-200 p-3 dark:border-zinc-700">
+          <p className="font-medium text-zinc-900 dark:text-zinc-100">{c.name}</p>
+          <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300"><span className="font-medium">Похожесть:</span> {c.similarity}</p>
+          <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300"><span className="font-medium">Подход:</span> {c.approach}</p>
+        </div>
+      ))}
+    </div>
+  );
+
+  const formatMarket = (market: ModelIdea["market"]) => (
+    <div className="space-y-4">
+      <div>
+        <p className="font-medium text-zinc-900 dark:text-zinc-100">Обзор рынка</p>
+        <p className="mt-1 text-sm text-zinc-700 dark:text-zinc-300">{market.overview}</p>
+      </div>
+      {market.competitors.length > 0 && (
+        <div>
+          <p className="font-medium text-zinc-900 dark:text-zinc-100">Конкуренты / Альтернативы</p>
+          <ul className="mt-2 space-y-1 list-disc list-inside text-sm text-zinc-700 dark:text-zinc-300">
+            {market.competitors.map((c, idx) => (
+              <li key={idx}><span className="font-medium">{c.name}</span> — {c.note}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {market.helpers.length > 0 && (
+        <div>
+          <p className="font-medium text-zinc-900 dark:text-zinc-100">Помощники / Провайдеры</p>
+          <ul className="mt-2 space-y-1 list-disc list-inside text-sm text-zinc-700 dark:text-zinc-300">
+            {market.helpers.map((h, idx) => (
+              <li key={idx}><span className="font-medium">{h.name}</span> — {h.how_helps}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+
+  const formatRisks = (risks: ModelIdea["risks"]) => (
+    <div className="space-y-4">
+      {Object.entries(risks).map(([category, items]) => (
+        items.length > 0 && (
+          <div key={category} className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800">
+            <p className="font-medium text-zinc-900 dark:text-zinc-100 capitalize">{category}</p>
+            <ul className="mt-2 space-y-1 list-disc list-inside text-sm text-zinc-700 dark:text-zinc-300">
+              {items.map((item, idx) => (
+                <li key={idx}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        )
+      ))}
+    </div>
+  );
 
   if (goalsLoading) {
     return (
@@ -397,6 +587,67 @@ export default function IdeaPage() {
                       </p>
                     </div>
                   </div>
+
+                  {modelIdea && (
+                    <div className="rounded-xl border border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedModelIdea((prev) => !prev)}
+                        className="w-full flex items-center justify-between gap-4 p-4 text-left"
+                        aria-expanded={expandedModelIdea}
+                      >
+                        <span className="font-semibold text-black dark:text-zinc-50">Детальный анализ от модели</span>
+                        <svg
+                          className={`h-5 w-5 text-zinc-500 transition-transform ${expandedModelIdea ? "rotate-180" : ""}`}
+                          viewBox="0 0 20 20"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01-.02-1.06z" />
+                        </svg>
+                      </button>
+                      {expandedModelIdea && (
+                        <div className="border-t border-zinc-200 p-4 space-y-6 dark:border-zinc-800">
+                          {modelIdea.quotes && modelIdea.quotes.length > 0 && (
+                            <div>
+                              <h3 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Цитаты из интервью</h3>
+                              {formatQuotes(modelIdea.quotes)}
+                            </div>
+                          )}
+                          {modelIdea.why_you && (
+                            <div>
+                              <h3 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Почему это подходит вам</h3>
+                              <p className="text-sm text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap leading-relaxed">{modelIdea.why_you}</p>
+                            </div>
+                          )}
+                          {modelIdea.first_step && (
+                            <div>
+                              <h3 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Первый шаг</h3>
+                              {formatFirstStep(modelIdea.first_step)}
+                            </div>
+                          )}
+                          {modelIdea.market && (
+                            <div>
+                              <h3 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Рынок и окружение</h3>
+                              {formatMarket(modelIdea.market)}
+                            </div>
+                          )}
+                          {modelIdea.risks && (
+                            <div>
+                              <h3 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Риски</h3>
+                              {formatRisks(modelIdea.risks)}
+                            </div>
+                          )}
+                          {modelIdea.similar_cases && modelIdea.similar_cases.length > 0 && (
+                            <div>
+                              <h3 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Похожие кейсы</h3>
+                              {formatSimilarCases(modelIdea.similar_cases)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {goal && goal.status !== "trash" && (
                     <div className="rounded-lg bg-zinc-50 p-3 text-sm text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
@@ -556,7 +807,7 @@ export default function IdeaPage() {
                                         {item.description}
                                       </p>
                                     )}
-                                    <div className="mt-4 grid gap-3 md:grid-cols-2">
+<div className="mt-4 grid gap-3 md:grid-cols-2">
                                       {item.strategies.map((strategy) => {
                                         const isSelected = selected[item.idea_index] === strategy.strategy_index;
                                         return (
@@ -567,14 +818,14 @@ export default function IdeaPage() {
                                               handleSelectStrategy(item.idea_index, strategy.strategy_index)
                                             }
                                             className={`rounded-xl border-2 p-4 text-left transition-colors hover:border-zinc-500 ${
-                                              isSelected
-                                                ? "border-black dark:border-white"
-                                                : "border-zinc-200 dark:border-zinc-700"
-                                            }`}
+                                                isSelected
+                                                  ? "border-black dark:border-white"
+                                                  : "border-zinc-200 dark:border-zinc-700"
+                                              }`}
                                           >
                                             <div className="flex items-start justify-between gap-2">
                                               <h4 className="text-sm font-medium text-black dark:text-zinc-50">
-                                                {strategy.title}
+                                                {strategy.name}
                                               </h4>
                                               {isSelected && (
                                                 <span className="shrink-0 rounded-full bg-black px-2 py-0.5 text-[10px] font-medium text-white dark:bg-white dark:text-black">
@@ -582,9 +833,23 @@ export default function IdeaPage() {
                                                 </span>
                                               )}
                                             </div>
-                                            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                                              Шагов: {strategy.steps.length}
-                                            </p>
+                                            {strategy.approach && (
+                                              <p className="mt-2 text-xs text-zinc-600 dark:text-zinc-400 line-clamp-2">
+                                                {strategy.approach}
+                                              </p>
+                                            )}
+                                            <div className="mt-3 space-y-1 text-xs text-zinc-500 dark:text-zinc-400">
+                                              {strategy.timeline && (
+                                                <span className="block">📅 {strategy.timeline}</span>
+                                              )}
+                                              {strategy.budget && (
+                                                <span className="block">💰 {strategy.budget}</span>
+                                              )}
+                                              {strategy.investment && (
+                                                <span className="block">⚡ {strategy.investment}</span>
+                                              )}
+                                              <span className="block">Шагов: {strategy.steps.length}</span>
+                                            </div>
                                             <div className="mt-3 space-y-2">
                                               {strategy.steps.map((step, stepIndex) => (
                                                 <div
@@ -596,12 +861,17 @@ export default function IdeaPage() {
                                                   }`}
                                                 >
                                                   <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-zinc-300 text-xs text-zinc-500 dark:border-zinc-600 dark:text-zinc-400">
-                                                    {stepIndex + 1}
+                                                    {step.number}
                                                   </span>
                                                   <span className="min-w-0 flex-1">
                                                     <span className="block text-sm text-zinc-700 dark:text-zinc-200">
                                                       {step.title}
                                                     </span>
+                                                    {step.duration && (
+                                                      <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
+                                                        {step.duration}
+                                                      </span>
+                                                    )}
                                                     {step.description && (
                                                       <span className="mt-1 block text-xs text-zinc-500 dark:text-zinc-400">
                                                         {step.description}
@@ -617,8 +887,104 @@ export default function IdeaPage() {
                                               ))}
                                             </div>
                                           </button>
-                                        );
+);
                                       })}
+                                          {expandedStrategy?.ideaIndex === item.idea_index && expandedStrategy?.strategyIndex === strategy.strategy_index && (
+                                            <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                                              <button
+                                                type="button"
+                                                onClick={() => setExpandedStrategy(null)}
+                                                className="mb-3 text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                                              >
+                                                Скрыть детали ↑
+                                              </button>
+                                              <div className="space-y-4 text-sm">
+                                                <div>
+                                                  <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Подход</h5>
+                                                  <p className="text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">{strategy.approach}</p>
+                                                </div>
+                                                {strategy.resources && strategy.resources.length > 0 && (
+                                                  <div>
+                                                    <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Ресурсы</h5>
+                                                    <div className="space-y-2">
+                                                      {strategy.resources.map((res, idx) => (
+                                                        <div key={idx} className="rounded bg-white p-3 dark:bg-zinc-800">
+                                                          <p className="font-medium text-zinc-900 dark:text-zinc-100">{res.category}</p>
+                                                          <ul className="mt-1 list-disc list-inside text-zinc-700 dark:text-zinc-300">
+                                                            {res.items.map((item, i) => (
+                                                              <li key={i}>{item}</li>
+                                                            ))}
+                                                          </ul>
+                                                          <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{res.rationale}</p>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                                {strategy.support && strategy.support.length > 0 && (
+                                                  <div>
+                                                    <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Поддержка</h5>
+                                                    <div className="space-y-2">
+                                                      {strategy.support.map((sup, idx) => (
+                                                        <div key={idx} className="rounded bg-white p-3 dark:bg-zinc-800">
+                                                          <p className="font-medium text-zinc-900 dark:text-zinc-100">{sup.who} {sup.needed ? " (нужен на старте)" : ""}</p>
+                                                          <p className="mt-1 text-zinc-700 dark:text-zinc-300">{sup.description}</p>
+                                                        </div>
+                                                      ))}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                                {strategy.time_to_launch && (
+                                                  <div>
+                                                    <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Время до запуска</h5>
+                                                    <div className="space-y-1 text-zinc-700 dark:text-zinc-300">
+                                                      <p>До первого шага: {strategy.time_to_launch.days_to_first_step} дн.</p>
+                                                      <p>До результата этапа: {strategy.time_to_launch.days_to_result} дн.</p>
+                                                      <p className="text-xs text-zinc-500 dark:text-zinc-400">{strategy.time_to_launch.note}</p>
+                                                    </div>
+                                                  </div>
+                                                )}
+                                                {strategy.timeline && (
+                                                  <div>
+                                                    <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Временная шкала</h5>
+                                                    <p className="text-zinc-700 dark:text-zinc-300">{strategy.timeline}</p>
+                                                  </div>
+                                                )}
+                                                {strategy.budget && (
+                                                  <div>
+                                                    <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Бюджет</h5>
+                                                    <p className="text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">{strategy.budget}</p>
+                                                  </div>
+                                                )}
+                                                {strategy.investment && (
+                                                  <div>
+                                                    <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Вложения (нематериальные)</h5>
+                                                    <p className="text-zinc-700 dark:text-zinc-300 whitespace-pre-wrap">{strategy.investment}</p>
+                                                  </div>
+                                                )}
+                                                {strategy.avoid && strategy.avoid.length > 0 && (
+                                                  <div>
+                                                    <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Чего избегать</h5>
+                                                    <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300">
+                                                      {strategy.avoid.map((av, idx) => (
+                                                        <li key={idx}><span className="font-medium">{av.rule}</span> — {av.reason}</li>
+                                                      ))}
+                                                    </ul>
+                                                  </div>
+                                                )}
+                                                {strategy.assumptions && strategy.assumptions.length > 0 && (
+                                                  <div>
+                                                    <h5 className="font-medium text-zinc-900 dark:text-zinc-100 mb-2">Допущения</h5>
+                                                    <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300">
+                                                      {strategy.assumptions.map((as, idx) => (
+                                                        <li key={idx}>{as}</li>
+                                                      ))}
+                                                    </ul>
+                                                  </div>
+                                                )}
+                                              </div>
+                                            </div>
+                                          )}
                                     </div>
                                   </div>
                                 );
@@ -653,7 +1019,7 @@ export default function IdeaPage() {
                               type="button"
                               onClick={handleDecomposePlan}
                               disabled={
-                                planLoading || Object.keys(selected).length === 0 || !decomposeAnalysisId
+                                planLoading || Object.keys(selected).length === 0
                               }
                               className="w-full rounded-md bg-black px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
                             >
