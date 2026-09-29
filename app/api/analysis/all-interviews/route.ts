@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
+import { resolveInterviewPrompt } from "@/lib/subscription";
 import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers, type AnswerItem } from "@/lib/interview-prompt";
 
 export async function GET(request: Request) {
@@ -94,12 +95,15 @@ if (!claudeConfigured()) {
     // Use the prompt from the first interview (default)
     const { data: interview } = await supabase
       .from("interview")
-      .select("prompt")
+      .select("prompt, pay4prompt")
       .eq("code", "default")
       .eq("visible", true)
       .single();
 
-    const systemPrompt = interview?.prompt || "Ты — карьерный и жизненный стратег. Ты говоришь по-русски. Проанализируй ответы и предложи 5 идей в JSON.";
+    const systemPrompt = await resolveInterviewPrompt(clientUuid, {
+      prompt: interview?.prompt ?? null,
+      pay4prompt: interview?.pay4prompt ?? null,
+    }) || "Ты — карьерный и жизненный стратег. Ты говоришь по-русски. Проанализируй ответы и предложи 5 идей в JSON.";
 
     try {
       const questionIndex = await loadQuestionIndex(

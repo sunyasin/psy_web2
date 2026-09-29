@@ -2,6 +2,7 @@
 
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
+import { resolveInterviewPrompt } from "@/lib/subscription";
 import type { InterviewConfigRow, InterviewSessionRow, InterviewQuestionResult, Idea, GoalRow, SelectedIdea } from "@/lib/types";
 import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers } from "@/lib/interview-prompt";
 
@@ -492,12 +493,15 @@ let ideas: Idea[];
         try {
           const { data: interview } = await supabase
             .from("interview")
-            .select("prompt")
+            .select("prompt, pay4prompt")
             .eq("id", session.interview_id)
             .single();
 
           const systemPrompt =
-            interview?.prompt ||
+            await resolveInterviewPrompt(clientUuid, {
+              prompt: interview?.prompt ?? null,
+              pay4prompt: interview?.pay4prompt ?? null,
+            }) ||
             "Ты — карьерный и жизненный стратег. Ты говоришь по-русски. Проанализируй ответы и предложи 5 идей в JSON.";
 
           const response = await callClaude(

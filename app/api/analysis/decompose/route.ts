@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
+import { resolveInterviewPrompt } from "@/lib/subscription";
 import type { ShortAnalysisResult } from "@/lib/types";
 import {
   DECOMPOSITION_KIND,
@@ -110,7 +111,7 @@ export async function POST(request: Request) {
 
     const { data: interviews, error: interviewsError } = await supabase
       .from("interview")
-      .select("id, code, prompt")
+      .select("id, code, prompt, pay4prompt")
       .in("code", [DECOMPOSITION_INTERVIEW_CODE, FULL_INTERVIEW_CODE]);
 
     if (interviewsError) {
@@ -168,13 +169,17 @@ export async function POST(request: Request) {
     let modelUsed = "fallback";
     let strategies: ShortAnalysisResult[] = [];
 
-    if (claudeConfigured()) {
-      try {
-        const response = await callClaude(
-          [{ role: "user", text: promptText }],
-          decompositionInterview.prompt || "",
-          { max_tokens: 10000, temperature: 0.7 }
-        );
+if (claudeConfigured()) {
+        try {
+          const systemPrompt = await resolveInterviewPrompt(clientUuid, {
+            prompt: decompositionInterview.prompt,
+            pay4prompt: decompositionInterview.pay4prompt,
+          });
+          const response = await callClaude(
+            [{ role: "user", text: promptText }],
+            systemPrompt || decompositionInterview.prompt || "",
+            { max_tokens: 10000, temperature: 0.7 }
+          );
         strategies = normalizeStrategies(parseModelResponse(response));
         if (strategies.length > 0) {
           modelJson = { raw_response: response };

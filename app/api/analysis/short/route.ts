@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured } from "@/lib/claude";
+import { resolveInterviewPrompt } from "@/lib/subscription";
 import type { NewStage, NewStep, NewStrategy, NewTimeToLaunch } from "@/lib/types";
 import { parseShortResponse } from "@/lib/short-analysis";
 import { flattenAnswers, formatNumberedQA, loadQuestionIndex, numberAnswers, type AnswerItem } from "@/lib/interview-prompt";
@@ -66,7 +67,7 @@ export async function GET(request: Request) {
     const interviewIds = [...new Set(sessions.map((session) => session.interview_id).filter(Boolean))] as string[];
     const { data: interviewRows, error: interviewError } = await supabase
       .from("interview")
-      .select("id, code, prompt")
+      .select("id, code, prompt, pay4prompt")
       .in("id", interviewIds.length > 0 ? interviewIds : ["00000000-0000-0000-0000-000000000000"]);
     if (interviewError) {
       return NextResponse.json({ error: interviewError.message }, { status: 500 });
@@ -76,6 +77,11 @@ export async function GET(request: Request) {
     if (!shortInterview) {
       return NextResponse.json({ error: "Short interview prompt not found" }, { status: 404 });
     }
+
+    const systemPrompt = await resolveInterviewPrompt(clientUuid, {
+      prompt: shortInterview.prompt,
+      pay4prompt: shortInterview.pay4prompt,
+    });
 
     const shortSessions = (sessions || []).filter(
       (session) => session.interview_id === shortInterview.id
@@ -108,13 +114,13 @@ export async function GET(request: Request) {
     let modelUsed = "fallback";
     let modelJson: unknown = null;
 
-    if (claudeConfigured()) {
-      try {
-        const response = await callClaude(
-          [{ role: "user", text: promptText }],
-          shortInterview.prompt,
-          { max_tokens: 10000, temperature: 0.7 }
-        );
+if (claudeConfigured()) {
+        try {
+          const response = await callClaude(
+            [{ role: "user", text: promptText }],
+            systemPrompt,
+            { max_tokens: 10000, temperature: 0.7 }
+          );
         modelJson = { raw_response: response };
         const parsed = parseShortResponse(JSON.parse(stripCodeFence(response)));
         stages = parsed ? parsed.stages : [];

@@ -118,6 +118,20 @@ export async function getSubscriptionStatus(clientUuid: string) {
   };
 }
 
+/**
+ * Возвращает промпт для интервью: если у клиента активная платная подписка —
+ * используется поле pay4prompt, иначе — prompt.
+ */
+export async function resolveInterviewPrompt(
+  clientUuid: string,
+  interview: { prompt: string | null; pay4prompt: string | null } | null
+): Promise<string> {
+  if (!interview) return "";
+  const status = await getSubscriptionStatus(clientUuid);
+  const isPaid = Boolean(status?.isPaid);
+  return (isPaid ? interview.pay4prompt : interview.prompt) || interview.prompt || "";
+}
+
 export function verifyTributeSignature(rawBody: string, signatureHeader: string | null, apiKey: string): boolean {
   if (!signatureHeader || !apiKey) return false;
 
