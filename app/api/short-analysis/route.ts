@@ -34,29 +34,56 @@ export async function GET(request: Request) {
 
     const { analysis, response } = latest;
 
-    const stages = response.stages.map((stage, stageIndex) => ({
-      id: `${analysis.id}:${stage.number || stageIndex}`,
-      stage_index: stageIndex,
-      number: stage.number,
-      name: stage.name,
-      description: stage.description,
-      strategies: stage.strategies.map((strategy, strategyIndex) => ({
-        id: `${analysis.id}:${stageIndex}:${strategyIndex}`,
+    // Какие этапы этого анализа уже разложены в планировщик.
+    const { data: plannerRows } = await supabase
+      .from("planner_stages")
+      .select("id, goal_id, idea_index, title")
+      .eq("client_uuid", clientUuid)
+      .eq("analysis_id", analysis.id)
+      .neq("status", "deleted");
+    const plannedByIndex = new Map<number, { id: string; goal_id: string }>();
+    for (const row of plannerRows || []) {
+      const ideaIndex = Number(row.idea_index);
+      if (Number.isFinite(ideaIndex) && !plannedByIndex.has(ideaIndex)) {
+        plannedByIndex.set(ideaIndex, { id: row.id, goal_id: row.goal_id });
+      }
+    }
+    const plannedByTitle = new Map<string, { id: string; goal_id: string }>();
+    for (const row of plannerRows || []) {
+      if (row.title && !plannedByTitle.has(row.title)) {
+        plannedByTitle.set(row.title, { id: row.id, goal_id: row.goal_id });
+      }
+    }
+
+    const stages = response.stages.map((stage, stageIndex) => {
+      const planned = plannedByIndex.get(stageIndex) ?? plannedByTitle.get(stage.name) ?? null;
+      return {
+        id: `${analysis.id}:${stage.number || stageIndex}`,
         stage_index: stageIndex,
-        strategy_index: strategyIndex,
-        name: strategy.name,
-        approach: strategy.approach,
-        resources: strategy.resources,
-        support: strategy.support,
-        steps: strategy.steps,
-        time_to_launch: strategy.time_to_launch,
-        timeline: strategy.timeline,
-        budget: strategy.budget,
-        investment: strategy.investment,
-        avoid: strategy.avoid,
-        assumptions: strategy.assumptions,
-      })),
-    }));
+        number: stage.number,
+        name: stage.name,
+        description: stage.description,
+        is_planned: Boolean(planned),
+        planner_goal_id: planned?.goal_id ?? null,
+        planner_stage_id: planned?.id ?? null,
+        strategies: stage.strategies.map((strategy, strategyIndex) => ({
+          id: `${analysis.id}:${stageIndex}:${strategyIndex}`,
+          stage_index: stageIndex,
+          strategy_index: strategyIndex,
+          name: strategy.name,
+          approach: strategy.approach,
+          resources: strategy.resources,
+          support: strategy.support,
+          steps: strategy.steps,
+          time_to_launch: strategy.time_to_launch,
+          timeline: strategy.timeline,
+          budget: strategy.budget,
+          investment: strategy.investment,
+          avoid: strategy.avoid,
+          assumptions: strategy.assumptions,
+        })),
+      };
+    });
 
     return NextResponse.json({
       analysis: {

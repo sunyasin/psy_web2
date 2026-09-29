@@ -121,7 +121,7 @@ export default function InterviewSelectPage() {
     <div className="flex min-h-screen flex-col items-center justify-center bg-zinc-50 px-6 py-16 font-sans dark:bg-black">
       <main className="w-full max-w-lg space-y-6">
         <div className="text-center">
-          <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">{displayName ? `${displayName}. ` : ""}Выбери формат интервью</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-black dark:text-zinc-50">{displayName ? `${displayName}, ` : ""} выбери формат интервью</h1>
           <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">Короткое интервью исследует одну цель или идею и строит стратегию её достижения.</p>
         </div>
         {error && <p className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">{error}</p>}

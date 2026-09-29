@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { StrategyDetails } from "@/components/strategy-details";
 import type { NewStrategy } from "@/lib/types";
 
@@ -59,6 +59,9 @@ type Stage = {
   number: number;
   name: string;
   description: string;
+  is_planned: boolean;
+  planner_goal_id: string | null;
+  planner_stage_id: string | null;
   strategies: Strategy[];
 };
 
@@ -84,42 +87,53 @@ export default function ShortAnalysisPage() {
   const [planMessage, setPlanMessage] = useState<string | null>(null);
   const [expandedStrategy, setExpandedStrategy] = useState<string | null>(null);
 
-  useEffect(() => {
+  const loadAnalysis = useCallback(async () => {
     if (!clientUuid) {
-      queueMicrotask(() => {
-        setError("Сессия не найдена. Вернитесь на главную.");
-        setLoading(false);
-      });
+      setError("Сессия не найдена. Вернитесь на главную.");
+      setLoading(false);
       return;
     }
-    fetch(`/api/short-analysis?client_uuid=${encodeURIComponent(clientUuid)}`)
-      .then(async (response) => {
-        const payload = (await response.json()) as AnalysisData & { error?: string };
-        if (!response.ok) throw new Error(payload.error || "Не удалось загрузить анализ");
-        setData({
-          ...payload,
-          stages: (payload.stages || []).map((stage) => ({
-            ...stage,
-            strategies: (stage.strategies || []).map((strategy) => ({
-              ...strategy,
-              approach: strategy.approach || "",
-              resources: strategy.resources || [],
-              support: strategy.support || [],
-              steps: strategy.steps || [],
-              time_to_launch: strategy.time_to_launch || { days_to_first_step: 0, days_to_result: 0, note: "" },
-              timeline: strategy.timeline || "",
-              budget: strategy.budget || "",
-              investment: strategy.investment || "",
-              avoid: strategy.avoid || [],
-              assumptions: strategy.assumptions || [],
-              is_selected: false,
-            })),
+    try {
+      const response = await fetch(`/api/short-analysis?client_uuid=${encodeURIComponent(clientUuid)}`);
+      const payload = (await response.json()) as AnalysisData & { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Не удалось загрузить анализ");
+      setData({
+        ...payload,
+        stages: (payload.stages || []).map((stage) => ({
+          ...stage,
+          is_planned: Boolean(stage.is_planned),
+          planner_goal_id: stage.planner_goal_id ?? null,
+          planner_stage_id: stage.planner_stage_id ?? null,
+          strategies: (stage.strategies || []).map((strategy) => ({
+            ...strategy,
+            approach: strategy.approach || "",
+            resources: strategy.resources || [],
+            support: strategy.support || [],
+            steps: strategy.steps || [],
+            time_to_launch: strategy.time_to_launch || { days_to_first_step: 0, days_to_result: 0, note: "" },
+            timeline: strategy.timeline || "",
+            budget: strategy.budget || "",
+            investment: strategy.investment || "",
+            avoid: strategy.avoid || [],
+            assumptions: strategy.assumptions || [],
+            is_selected: false,
           })),
-        });
-      })
-      .catch((err) => setError(err instanceof Error ? err.message : "Не удалось загрузить анализ"))
-      .finally(() => setLoading(false));
+        })),
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось загрузить анализ");
+    } finally {
+      setLoading(false);
+    }
   }, [clientUuid]);
+
+  useEffect(() => {
+    // Загрузка вне тела эффекта, чтобы обновления состояния не шли синхронно.
+    const timer = window.setTimeout(() => {
+      void loadAnalysis();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [loadAnalysis]);
 
   const selectedCount = useMemo(
     () => data?.stages.filter((stage) => stage.strategies.some((strategy) => strategy.is_selected)).length || 0,
@@ -162,6 +176,8 @@ export default function ShortAnalysisPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Не удалось загрузить в планировщик");
       setPlanMessage("Выбранные идеи и стратегии загружены в планировщик.");
+      // Перечитываем анализ, чтобы этапы, попавшие в планировщик, сразу получили рамку и ссылку.
+      await loadAnalysis();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Не удалось загрузить в планировщик");
     } finally {
@@ -204,9 +220,29 @@ export default function ShortAnalysisPage() {
             </section>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">Проанализировано ответов: {data.analysis.answer_count || 0}. Выберите стратегию для каждого этапа.</p>
             {data.stages.map((stage) => (
-              <section key={stage.id} className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+              <section
+                key={stage.id}
+                className={`space-y-4 rounded-2xl border-2 bg-white p-6 dark:bg-zinc-900 ${
+                  stage.is_planned
+                    ? "border-green-500 dark:border-green-400"
+                    : "border-zinc-200 dark:border-zinc-800"
+                }`}
+              >
                 <div>
-                  <h2 className="text-lg font-semibold text-black dark:text-zinc-50">Этап {stage.number}. {stage.name}</h2>
+                  <h2 className="text-lg font-semibold text-black dark:text-zinc-50">
+                    Этап {stage.number}. {stage.name}
+                    {stage.is_planned && (
+                      <>
+                        {" · "}
+                        <a
+                          href={stage.planner_goal_id ? `/planner/goal?id=${encodeURIComponent(stage.planner_goal_id)}` : "/planner"}
+                          className="text-green-600 underline underline-offset-2 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                        >
+                          Уже в планировщике
+                        </a>
+                      </>
+                    )}
+                  </h2>
                   {stage.description && <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-400">{stage.description}</p>}
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
