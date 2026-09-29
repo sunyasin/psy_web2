@@ -5,10 +5,8 @@ import { LoginForm } from "@/components/LoginForm";
 
 export default function Welcome() {
   const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [lookupLoading, setLookupLoading] = useState(false);
   const [showLoginForm, setShowLoginForm] = useState(false);
 
   useEffect(() => {
@@ -26,61 +24,6 @@ export default function Welcome() {
     }
   }, []);
 
-  async function lookupSession(
-    displayName: string,
-    lookupEmail: string,
-    signal: AbortSignal
-  ) {
-    setLookupLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(
-        `/api/client/lookup?display_name=${encodeURIComponent(displayName)}&email=${encodeURIComponent(lookupEmail)}`,
-        { signal }
-      );
-
-      if (!res.ok) {
-        return;
-      }
-
-      const data = await res.json();
-      if (data.found && data.client_uuid) {
-        document.cookie = `client_uuid=${data.client_uuid}; path=/; max-age=31536000; SameSite=Lax`;
-        document.cookie = `display_name=${data.display_name || displayName}; path=/; max-age=31536000; SameSite=Lax`;
-        document.cookie = `email=${data.email || lookupEmail}; path=/; max-age=31536000; SameSite=Lax`;
-        localStorage.setItem("client_uuid", data.client_uuid);
-        localStorage.setItem("display_name", data.display_name || displayName);
-        localStorage.setItem("email", data.email || lookupEmail);
-
-        window.location.href = "/";
-      }
-    } catch {
-      if (!signal.aborted) {
-        setError("Ошибка соединения");
-      }
-    } finally {
-      setLookupLoading(false);
-    }
-  }
-
-  useEffect(() => {
-    const trimmedName = name.trim();
-    const trimmedEmail = email.trim();
-    if (!trimmedName || !trimmedEmail) {
-      return;
-    }
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      lookupSession(trimmedName, trimmedEmail, controller.signal);
-    }, 500);
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [name, email]);
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
@@ -95,10 +38,7 @@ export default function Welcome() {
       const res = await fetch("/api/client/init", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          display_name: name.trim(),
-          email: email.trim() || undefined,
-        }),
+        body: JSON.stringify({ display_name: name.trim() }),
       });
 
       const data = await res.json();
@@ -108,10 +48,8 @@ export default function Welcome() {
 
       document.cookie = `client_uuid=${data.client_uuid}; path=/; max-age=31536000; SameSite=Lax`;
       document.cookie = `display_name=${data.display_name || ""}; path=/; max-age=31536000; SameSite=Lax`;
-      document.cookie = `email=${data.email || ""}; path=/; max-age=31536000; SameSite=Lax`;
       localStorage.setItem("client_uuid", data.client_uuid);
       localStorage.setItem("display_name", data.display_name || "");
-      localStorage.setItem("email", data.email || "");
 
       window.location.href = "/";
     } catch (err) {
@@ -151,21 +89,8 @@ export default function Welcome() {
               placeholder="Ваше имя"
               autoFocus
               className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-black shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:focus:border-white"
-              disabled={submitting || lookupLoading}
+              disabled={submitting}
             />
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email (для восстановления сессии)"
-              className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-black shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:focus:border-white"
-              disabled={submitting || lookupLoading}
-            />
-            {lookupLoading && (
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Ищу вашу сессию...
-              </p>
-            )}
             {error && (
               <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
             )}

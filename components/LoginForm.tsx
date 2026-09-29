@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { saveSession } from "@/lib/authSession";
 
 interface LoginFormProps {
   onCancel?: () => void;
@@ -15,14 +16,14 @@ export function LoginForm({
   autoFocus = false,
   className = "",
 }: LoginFormProps) {
-  const [loginEmail, setLoginEmail] = useState("");
+  const [loginValue, setLoginValue] = useState("");
   const [loginPassword, setLoginPassword] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginEmail.trim() || !loginPassword) return;
+    if (!loginValue.trim() || !loginPassword) return;
 
     setLoginError(null);
     setLoginLoading(true);
@@ -30,7 +31,7 @@ export function LoginForm({
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: loginEmail.trim(), password: loginPassword }),
+        body: JSON.stringify({ login: loginValue.trim(), password: loginPassword }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -38,12 +39,13 @@ export function LoginForm({
         return;
       }
 
-      document.cookie = `client_uuid=${data.client_uuid}; path=/; max-age=31536000; SameSite=Lax`;
-      document.cookie = `display_name=${data.display_name || ""}; path=/; max-age=31536000; SameSite=Lax`;
-      document.cookie = `access_token=${data.access_token || ""}; path=/; max-age=31536000; SameSite=Lax`;
-      localStorage.setItem("client_uuid", data.client_uuid);
-      localStorage.setItem("display_name", data.display_name || "");
-      localStorage.setItem("access_token", data.access_token || "");
+      saveSession({
+        client_uuid: data.client_uuid,
+        display_name: data.display_name || "",
+        login: data.login || loginValue.trim(),
+        access_token: data.access_token || "",
+        refresh_token: data.refresh_token || null,
+      });
 
       window.location.href = "/";
     } catch {
@@ -56,10 +58,11 @@ export function LoginForm({
   return (
     <form onSubmit={handleLogin} className={`flex flex-col gap-3 ${className}`}>
       <input
-        type="email"
-        value={loginEmail}
-        onChange={(e) => setLoginEmail(e.target.value)}
-        placeholder="Логин (email)"
+        type="text"
+        value={loginValue}
+        onChange={(e) => setLoginValue(e.target.value)}
+        placeholder="Логин"
+        autoComplete="username"
         required
         autoFocus={autoFocus}
         className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-black shadow-sm focus:border-black focus:outline-none focus:ring-1 focus:ring-black dark:border-zinc-700 dark:bg-zinc-900 dark:text-white dark:focus:border-white"
@@ -79,7 +82,7 @@ export function LoginForm({
       <div className="flex gap-3">
         <button
           type="submit"
-          disabled={loginLoading || !loginEmail.trim() || !loginPassword}
+          disabled={loginLoading || !loginValue.trim() || !loginPassword}
           className="flex-1 rounded-md bg-black px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-zinc-200"
         >
           {loginLoading ? "Вхожу..." : "Войти"}

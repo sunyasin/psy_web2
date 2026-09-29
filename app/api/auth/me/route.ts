@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient, supabase } from "@/lib/supabase";
+import { normalizeLogin } from "@/lib/authIdentity";
 import type { ClientRow } from "@/lib/types";
 
 export async function GET(request: Request) {
@@ -23,14 +24,30 @@ export async function GET(request: Request) {
       );
     }
 
-    const supabaseAdmin = getSupabaseServerClient();
-    const client = await supabaseAdmin
-      .from("clients")
-      .select("client_uuid, display_name, email, created_at")
-      .eq("email", user.email)
-      .single();
+    const rawLogin = user.user_metadata?.login;
+    if (typeof rawLogin !== "string" || !rawLogin) {
+      return NextResponse.json(
+        { error: "У аккаунта не задан логин" },
+        { status: 404 }
+      );
+    }
 
-    if (client.error || !client.data) {
+    const supabaseAdmin = getSupabaseServerClient();
+    const { data: client, error: clientError } = await supabaseAdmin
+      .from("clients")
+      .select("client_uuid, display_name, login, created_at")
+      .eq("login", normalizeLogin(rawLogin))
+      .limit(1)
+      .maybeSingle();
+
+    if (clientError) {
+      return NextResponse.json(
+        { error: clientError.message || "Не удалось загрузить профиль" },
+        { status: 500 }
+      );
+    }
+
+    if (!client) {
       return NextResponse.json(
         { error: "Профиль не найден" },
         { status: 404 }
@@ -38,10 +55,10 @@ export async function GET(request: Request) {
     }
 
     const response: ClientRow = {
-      client_uuid: client.data.client_uuid,
-      display_name: client.data.display_name,
-      email: client.data.email,
-      created_at: client.data.created_at,
+      client_uuid: client.client_uuid,
+      display_name: client.display_name,
+      login: client.login,
+      created_at: client.created_at,
     };
 
     return NextResponse.json(response);

@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { LoginForm } from "@/components/LoginForm";
+import { restoreSession } from "@/lib/authSession";
+import type { ClientRow } from "@/lib/types";
 
 type PageState = "check" | "menu";
 
@@ -12,6 +14,8 @@ export default function Home() {
   const [displayName, setDisplayName] = useState("");
   const [isPaid, setIsPaid] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [login, setLogin] = useState("");
 
   const [showLoginForm, setShowLoginForm] = useState(false);
   const [showSubscriptionInfo, setShowSubscriptionInfo] = useState(false);
@@ -37,15 +41,21 @@ export default function Home() {
 
     (async () => {
       try {
-        const [sessionsRes, welcomeRes, subscriptionRes] = await Promise.all([
+        const [sessionsRes, welcomeRes, subscriptionRes, client] = await Promise.all([
           fetch(`/api/interview/has-completed?client_uuid=${clientUuid}`),
           fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=welcome`),
           fetch(`/api/subscriptions/status?client_uuid=${clientUuid}`),
+          restoreSession().catch(() => null as ClientRow | null),
         ]);
         const sessionsData = await sessionsRes.json();
         const welcomeData = await welcomeRes.json();
         setHasCompleted(sessionsData.completed);
         setWelcomeCompleted(welcomeData.completed);
+
+        if (client) {
+          setAuthorized(true);
+          setLogin(client.login || "");
+        }
 
         // Разбор раздела про вопрос доступен только по оплаченной подписке.
         // При ошибке или отсутствии ответа считаем, что подписки нет.
@@ -81,35 +91,37 @@ export default function Home() {
                   Привет {displayName ? `, ${displayName}` : ""} ! Что хочешь попробовать сегодня?
                 </h1>
                 <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-                  
+                  {authorized ? `Логин: ${login}` : ""}
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowLoginForm((v) => !v)}
-                aria-label="Login"
-                title="Login"
-                className="shrink-0 rounded-md border border-zinc-200 bg-white p-2 text-zinc-700 transition-colors hover:border-black hover:text-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-white dark:hover:text-white"
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={1.8}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  className="h-5 w-5"
-                  aria-hidden="true"
+              {!authorized && (
+                <button
+                  type="button"
+                  onClick={() => setShowLoginForm((v) => !v)}
+                  aria-label="Login"
+                  title="Login"
+                  className="shrink-0 rounded-md border border-zinc-200 bg-white p-2 text-zinc-700 transition-colors hover:border-black hover:text-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-white dark:hover:text-white"
                 >
-                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                  <path d="M10 17l5-5-5-5" />
-                  <path d="M15 12H3" />
-                </svg>
-              </button>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth={1.8}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="h-5 w-5"
+                    aria-hidden="true"
+                  >
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                    <path d="M10 17l5-5-5-5" />
+                    <path d="M15 12H3" />
+                  </svg>
+                </button>
+              )}
             </div>
 
-            {showLoginForm && (
+            {showLoginForm && !authorized && (
               <LoginForm
                 autoFocus
                 onCancel={() => setShowLoginForm(false)}

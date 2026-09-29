@@ -1,76 +1,78 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient, supabase } from "@/lib/supabase";
+import {
+  isValidLogin,
+  LOGIN_MAX_LENGTH,
+  LOGIN_MIN_LENGTH,
+  loginToAuthEmail,
+  normalizeLogin,
+} from "@/lib/authIdentity";
 import type { ClientRow } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, password } = body as {
-      email?: string;
+    const { login: rawLogin, password } = body as {
+      login?: string;
       password?: string;
     };
 
-    if (!email || !password) {
+    if (!rawLogin || !password) {
       return NextResponse.json(
-        { error: "Email и пароль обязательны" },
+        { error: "Логин и пароль обязательны" },
+        { status: 400 }
+      );
+    }
+
+    const login = normalizeLogin(rawLogin);
+    if (!isValidLogin(login)) {
+      return NextResponse.json(
+        { error: `Логин должен быть от ${LOGIN_MIN_LENGTH} до ${LOGIN_MAX_LENGTH} символов` },
         { status: 400 }
       );
     }
 
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email,
+      email: loginToAuthEmail(login),
       password,
     });
 
-    if (authError || !authData.user) {
+    if (authError || !authData.session) {
       return NextResponse.json(
-        { error: "Неверный email или пароль" },
+        { error: "Неверный логин или пароль" },
         { status: 401 }
       );
     }
 
     const supabaseAdmin = getSupabaseServerClient();
-    const client = await supabaseAdmin
+    const { data: client, error: clientError } = await supabaseAdmin
       .from("clients")
-      .select("client_uuid, display_name, email, created_at")
-      .eq("email", email)
-      .single();
+      .select("client_uuid, display_name, login, created_at")
+      .eq("login", login)
+      .limit(1)
+      .maybeSingle();
 
-    if (client.error || !client.data) {
-      const clientUuid = crypto.randomUUID();
-      const { data: newClient, error: insertError } = await supabaseAdmin
-        .from("clients")
-        .insert({
-          client_uuid: clientUuid,
-          email,
-        })
-        .select("client_uuid, display_name, email, created_at")
-        .single();
-
-      if (insertError || !newClient) {
-        return NextResponse.json(
-          { error: insertError?.message || "Не удалось создать профиль" },
-          { status: 500 }
-        );
-      }
-
-      const response: ClientRow & { access_token: string } = {
-        client_uuid: newClient.client_uuid,
-        display_name: newClient.display_name,
-        email: newClient.email,
-        created_at: newClient.created_at,
-        access_token: authData.session.access_token,
-      };
-
-      return NextResponse.json(response);
+    if (clientError) {
+      return NextResponse.json(
+        { error: clientError.message || "Не удалось загрузить профиль" },
+        { status: 500 }
+      );
     }
 
-    const response: ClientRow & { access_token: string } = {
-      client_uuid: client.data.client_uuid,
-      display_name: client.data.display_name,
-      email: client.data.email,
-      created_at: client.data.created_at,
+    if (!client) {
+      return NextResponse.json(
+        { error: "Профиль не найден" },
+        { status: 404 }
+      );
+    }
+
+    const response: ClientRow & { access_token: string; refresh_token: string | null } = {
+      client_uuid: client.client_uuid,
+      display_name: client.display_name,
+      login: client.login,
+      created_at: client.created_at,
       access_token: authData.session.access_token,
+      refresh_token: authData.session.refresh_token ?? null,
     };
 
     return NextResponse.json(response);

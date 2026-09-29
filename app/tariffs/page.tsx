@@ -5,18 +5,25 @@ import { useRouter } from "next/navigation";
 import { SubscriptionTiersList } from "@/components/SubscriptionTiersList";
 import { TelegramLinkDialog } from "@/components/TelegramLinkDialog";
 import { subscriptionsApi, SubscriptionSession } from "@/lib/subscriptionsApi";
+import {
+  enterWithCredentials,
+  getAccessToken,
+  getRefreshToken,
+  restoreSession,
+  saveSession,
+} from "@/lib/authSession";
+import type { ClientRow } from "@/lib/types";
 
-interface ClientProfile {
-  display_name: string;
-  email: string;
+function readStorage(key: string): string {
+  try {
+    return localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
 }
 
 function getClientUuid(): string | null {
-  try {
-    return localStorage.getItem("client_uuid");
-  } catch {
-    return null;
-  }
+  return readStorage("client_uuid") || null;
 }
 
 function LoadingSpinner() {
@@ -29,38 +36,22 @@ export default function TariffsPage() {
   const router = useRouter();
   const [clientUuid, setClientUuid] = useState<string | null>(null);
   const [session, setSession] = useState<SubscriptionSession | null>(null);
+  const [profile, setProfile] = useState<ClientRow | null>(null);
+  const [authorized, setAuthorized] = useState(false);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [binding, setBinding] = useState<{ botUrl: string | null; loginWidgetAuthUrl: string | null; expiresAt: string } | null>(null);
   const [bindingError, setBindingError] = useState<string | null>(null);
 
-  const [profile, setProfile] = useState<ClientProfile | null>(null);
   const [login, setLogin] = useState("");
   const [password, setPassword] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [credentialsSaved, setCredentialsSaved] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [credentialsError, setCredentialsError] = useState<string | null>(null);
 
   const loadSession = async (uuid: string) => {
     const result = await subscriptionsApi.getSession(uuid);
     if (!result || "error" in result) return;
     setSession(result);
-  };
-
-  const loadProfile = async (uuid: string) => {
-    try {
-      const res = await fetch(`/api/client/profile?client_uuid=${encodeURIComponent(uuid)}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        setCredentialsError(data.error || "Не удалось загрузить данные для входа");
-        return;
-      }
-      const data = await res.json();
-      setProfile({ display_name: data.display_name ?? "", email: data.email ?? "" });
-      setLogin(data.email ?? "");
-    } catch {
-      setCredentialsError("Не удалось загрузить данные для входа");
-    }
   };
 
   useEffect(() => {
@@ -72,8 +63,29 @@ export default function TariffsPage() {
 
     window.setTimeout(() => {
       setClientUuid(uuid);
+      setLogin(readStorage("login"));
       loadSession(uuid);
-      loadProfile(uuid).finally(() => setLoading(false));
+
+      restoreSession()
+        .then((client) => {
+          if (!client) return;
+
+          if (client.client_uuid !== uuid) {
+            saveSession({
+              client_uuid: client.client_uuid,
+              display_name: client.display_name ?? "",
+              login: client.login ?? "",
+              access_token: getAccessToken(),
+              refresh_token: getRefreshToken(),
+            });
+            window.location.reload();
+            return;
+          }
+
+          setProfile(client);
+          setAuthorized(true);
+        })
+        .finally(() => setLoading(false));
     }, 0);
   }, [router]);
 
@@ -102,34 +114,29 @@ export default function TariffsPage() {
     if (result.botUrl) window.open(result.botUrl, "_blank", "noopener,noreferrer");
   };
 
-  const saveCredentials = async () => {
+  const submitCredentials = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!clientUuid || !login.trim() || !password) return;
 
     setCredentialsError(null);
-    setSaving(true);
+    setSubmitting(true);
     try {
-      const res = await fetch("/api/client/profile", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_uuid: clientUuid, login: login.trim(), password }),
+      const result = await enterWithCredentials({
+        client_uuid: clientUuid,
+        login: login.trim(),
+        password,
       });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setCredentialsError(data.error || "Не удалось сохранить данные для входа");
-        return;
-      }
-      setCredentialsSaved(true);
-      setLogin(data.email ?? login.trim());
-    } catch {
-      setCredentialsError("Не удалось сохранить данные для входа");
-    } finally {
-      setSaving(false);
+
+      saveSession(result);
+      window.location.reload();
+    } catch (err) {
+      setCredentialsError(err instanceof Error ? err.message : "Не удалось войти");
+      setSubmitting(false);
     }
   };
 
   const telegramLinked = Boolean(session?.telegramLinked);
-
-  const canPurchase = credentialsSaved;
+  const canPurchase = authorized;
   const allFieldsFilled = Boolean(login.trim()) && Boolean(password);
 
   if (loading || !clientUuid || !session) {
@@ -152,89 +159,90 @@ export default function TariffsPage() {
             <p style={{ marginTop: "8px", fontSize: "14px", color: "#71717a" }}>Подписка открывает все функции приложения</p>
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div style={{ fontSize: "14px", fontWeight: 600, color: "#18181b" }}>Данные для входа:</div>
-            {profile ? (
-              <div style={{ fontSize: "14px", color: "#18181b" }}>
-                Ранее введённое имя: <span style={{ fontWeight: 600 }}>{profile.display_name || "(не задано)"}</span>
+          {!authorized ? (
+            <form onSubmit={submitCredentials} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 600, color: "#18181b" }}>Войдите или зарегистрируйтесь:</div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#3f3f46" }}>Логин</label>
+                <input
+                  type="text"
+                  value={login}
+                  onChange={(e) => setLogin(e.target.value)}
+                  placeholder="Любая строка"
+                  autoComplete="username"
+                  minLength={3}
+                  maxLength={64}
+                  required
+                  style={{
+                    width: "100%",
+                    borderRadius: "6px",
+                    border: "1px solid #d4d4d7",
+                    backgroundColor: "#fff",
+                    padding: "8px 12px",
+                    fontSize: "14px",
+                    color: "#18181b",
+                    outline: "none",
+                  }}
+                  disabled={submitting}
+                />
               </div>
-            ) : (
-              <div style={{ fontSize: "14px", color: "#71717a" }}>Ранее введённое имя: ...</div>
-            )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "12px", fontWeight: 600, color: "#3f3f46" }}>Логин</label>
-              <input
-                type="email"
-                value={login}
-                onChange={(e) => setLogin(e.target.value)}
-                placeholder="email@example.com"
-                required
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label style={{ fontSize: "12px", fontWeight: 600, color: "#3f3f46" }}>Пароль</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Не менее 6 символов"
+                  required
+                  minLength={6}
+                  style={{
+                    width: "100%",
+                    borderRadius: "6px",
+                    border: "1px solid #d4d4d7",
+                    backgroundColor: "#fff",
+                    padding: "8px 12px",
+                    fontSize: "14px",
+                    color: "#18181b",
+                    outline: "none",
+                  }}
+                  disabled={submitting}
+                />
+              </div>
+
+              {credentialsError && <p style={{ fontSize: "13px", color: "#ef4444" }}>{credentialsError}</p>}
+
+              <button
+                type="submit"
+                disabled={submitting || !allFieldsFilled}
                 style={{
-                  width: "100%",
+                  marginTop: "8px",
                   borderRadius: "6px",
-                  border: "1px solid #d4d4d7",
-                  backgroundColor: "#fff",
-                  padding: "8px 12px",
+                  backgroundColor: "#000",
+                  padding: "10px 24px",
                   fontSize: "14px",
-                  color: "#18181b",
-                  outline: "none",
+                  fontWeight: 500,
+                  color: "#fff",
+                  border: "none",
+                  cursor: submitting || !allFieldsFilled ? "not-allowed" : "pointer",
+                  opacity: submitting || !allFieldsFilled ? 0.5 : 1,
                 }}
-                disabled={saving || credentialsSaved}
-              />
+              >
+                {submitting ? "Проверяю..." : "Ok"}
+              </button>
+            </form>
+          ) : (
+            <div style={{ fontSize: "14px", color: "#18181b" }}>
+              Вы вошли как <span style={{ fontWeight: 600 }}>{profile?.login || login}</span>
             </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "12px", fontWeight: 600, color: "#3f3f46" }}>Пароль</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Не менее 6 символов"
-                required
-                minLength={6}
-                style={{
-                  width: "100%",
-                  borderRadius: "6px",
-                  border: "1px solid #d4d4d7",
-                  backgroundColor: "#fff",
-                  padding: "8px 12px",
-                  fontSize: "14px",
-                  color: "#18181b",
-                  outline: "none",
-                }}
-                disabled={saving}
-              />
-            </div>
-
-            {credentialsError && <p style={{ fontSize: "13px", color: "#ef4444" }}>{credentialsError}</p>}
-            {credentialsSaved && <p style={{ fontSize: "13px", color: "#16a34a" }}>Сохранено в БД</p>}
-
-            <button
-              onClick={saveCredentials}
-              disabled={saving || !allFieldsFilled}
-              style={{
-                marginTop: "8px",
-                borderRadius: "6px",
-                backgroundColor: "#000",
-                padding: "10px 24px",
-                fontSize: "14px",
-                fontWeight: 500,
-                color: "#fff",
-                border: "none",
-                cursor: saving || !allFieldsFilled ? "not-allowed" : "pointer",
-                opacity: saving || !allFieldsFilled ? 0.5 : 1,
-              }}
-            >
-              {saving ? "Сохраняю..." : "Ok"}
-            </button>
-          </div>
+          )}
 
           {telegramLinked ? (
             <SubscriptionTiersList
               clientUuid={clientUuid}
               canPurchase={canPurchase}
-              purchaseDisabledReason={canPurchase ? undefined : "Сохраните данные для входа, чтобы оформить подписку"}
+              purchaseDisabledReason={canPurchase ? undefined : "Войдите или зарегистрируйтесь, чтобы оформить подписку"}
             />
           ) : (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "16px", padding: "32px 0" }}>
@@ -261,7 +269,7 @@ export default function TariffsPage() {
               </button>
               {!canPurchase && (
                 <p style={{ fontSize: "12px", color: "#71717a", textAlign: "center" }}>
-                  Сначала сохраните данные для входа
+                  Сначала войдите или зарегистрируйтесь
                 </p>
               )}
             </div>

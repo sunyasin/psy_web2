@@ -3,7 +3,7 @@ export type IntentPath = "A_purpose" | "B_problem" | "C_domains";
 export interface ClientRow {
   client_uuid: string;
   display_name?: string | null;
-  email?: string | null;
+  login?: string | null;
   created_at: string;
 }
 
@@ -19,7 +19,7 @@ export interface EntryIntentRow {
 export interface InitClientResponse {
   client_uuid: string;
   display_name?: string | null;
-  email?: string | null;
+  login?: string | null;
 }
 
 export interface ClassifyIntentResponse {

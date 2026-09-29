@@ -1,19 +1,34 @@
 import { NextResponse } from "next/server";
 import { getSupabaseServerClient } from "@/lib/supabase";
+import {
+  isValidLogin,
+  LOGIN_MAX_LENGTH,
+  LOGIN_MIN_LENGTH,
+  loginToAuthEmail,
+  normalizeLogin,
+} from "@/lib/authIdentity";
 import type { ClientRow } from "@/lib/types";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { email, password, display_name } = body as {
-      email?: string;
+    const { login: rawLogin, password, display_name } = body as {
+      login?: string;
       password?: string;
       display_name?: string;
     };
 
-    if (!email || !password) {
+    if (!rawLogin || !password) {
       return NextResponse.json(
-        { error: "Email и пароль обязательны" },
+        { error: "Логин и пароль обязательны" },
+        { status: 400 }
+      );
+    }
+
+    const login = normalizeLogin(rawLogin);
+    if (!isValidLogin(login)) {
+      return NextResponse.json(
+        { error: `Логин должен быть от ${LOGIN_MIN_LENGTH} до ${LOGIN_MAX_LENGTH} символов` },
         { status: 400 }
       );
     }
@@ -25,11 +40,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const authEmail = loginToAuthEmail(login);
     const supabaseAdmin = getSupabaseServerClient();
+
     const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-      email,
+      email: authEmail,
       password,
       email_confirm: true,
+      user_metadata: { login },
     });
 
     if (authError || !authData.user) {
@@ -40,7 +58,7 @@ export async function POST(request: Request) {
     }
 
     const { data: signInData, error: signInError } = await supabaseAdmin.auth.signInWithPassword({
-      email,
+      email: authEmail,
       password,
     });
 
@@ -52,16 +70,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const clientUuid = crypto.randomUUID();
-
     const { data: clientData, error: clientError } = await supabaseAdmin
       .from("clients")
       .insert({
-        client_uuid: clientUuid,
-        email,
+        client_uuid: crypto.randomUUID(),
+        login,
         display_name: display_name || null,
       })
-      .select("client_uuid, display_name, email, created_at")
+      .select("client_uuid, display_name, login, created_at")
       .single();
 
     if (clientError) {
@@ -72,12 +88,13 @@ export async function POST(request: Request) {
       );
     }
 
-    const response: ClientRow & { access_token: string } = {
+    const response: ClientRow & { access_token: string; refresh_token: string | null } = {
       client_uuid: clientData.client_uuid,
       display_name: clientData.display_name,
-      email: clientData.email,
+      login: clientData.login,
       created_at: clientData.created_at,
       access_token: signInData.session.access_token,
+      refresh_token: signInData.session.refresh_token ?? null,
     };
 
     return NextResponse.json(response, { status: 201 });

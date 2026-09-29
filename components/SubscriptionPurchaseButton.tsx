@@ -89,9 +89,13 @@ export function SubscriptionPurchaseButton({
           border: "none",
         }}
       >
-        {disabled ? "Сначала сохраните данные для входа" : isLoading ? "Создаю платёж..." : `Оплатить ${price} ${currency}`}
+        {isLoading ? "Создаю платёж..." : `Оплатить ${price} ${currency}`}
       </button>
-      {disabledReason && <p style={{ marginTop: "8px", fontSize: "12px", color: "#71717a" }}>{disabledReason}</p>}
+      {disabled && (
+        <p style={{ marginTop: "8px", fontSize: "12px", color: "#71717a" }}>
+          {disabledReason || "Сначала войдите или зарегистрируйтесь"}
+        </p>
+      )}
       {error && <p style={{ marginTop: "8px", fontSize: "12px", color: "#ef4444" }}>{error}</p>}
     </div>
   );

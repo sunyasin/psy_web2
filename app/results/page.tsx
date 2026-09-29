@@ -598,7 +598,7 @@ className={`cursor-pointer rounded-xl border-2 p-5 transition-colors ${
               </h3>
 
               <label className="mb-2 block text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                Напишите удобный способ связи с Вами. Имя, Email, телефон, Никнейм или телефон в удобной соцсети
+                Напишите удобный способ связи с Вами. Имя, никнейм или телефон в удобной соцсети
               </label>
               <input
                 type="text"
@@ -611,11 +611,10 @@ className={`cursor-pointer rounded-xl border-2 p-5 transition-colors ${
 
               <div className="mb-4">
                 <p className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">Выберите способ связи:</p>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: "telegram", label: "Telegram", svg: <TelegramIcon /> },
                     { id: "instagram", label: "Instagram", svg: <InstagramIcon /> },
-                    { id: "email", label: "Email", svg: <EmailIcon /> },
                     { id: "phone", label: "Телефон", svg: <PhoneIcon /> },
                   ].map((method) => (
                     <button
@@ -737,15 +736,6 @@ function InstagramIcon() {
       <rect x="2" y="2" width="20" height="20" rx="5" />
       <circle cx="12" cy="12" r="4" />
       <circle cx="17.5" cy="6.5" r="1.5" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function EmailIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="2" y="4" width="20" height="16" rx="2" />
-      <path d="M22 4L12 13 2 4" />
     </svg>
   );
 }
