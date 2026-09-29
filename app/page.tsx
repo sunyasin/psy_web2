@@ -10,6 +10,7 @@ export default function Home() {
   const [hasCompleted, setHasCompleted] = useState(false);
   const [welcomeCompleted, setWelcomeCompleted] = useState(false);
   const [displayName, setDisplayName] = useState("");
+  const [isPaid, setIsPaid] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [showLoginForm, setShowLoginForm] = useState(false);
@@ -35,14 +36,20 @@ export default function Home() {
 
     (async () => {
       try {
-        const [sessionsRes, welcomeRes] = await Promise.all([
+        const [sessionsRes, welcomeRes, subscriptionRes] = await Promise.all([
           fetch(`/api/interview/has-completed?client_uuid=${clientUuid}`),
           fetch(`/api/interview/has-completed?client_uuid=${clientUuid}&interview_code=welcome`),
+          fetch(`/api/subscriptions/status?client_uuid=${clientUuid}`),
         ]);
         const sessionsData = await sessionsRes.json();
         const welcomeData = await welcomeRes.json();
         setHasCompleted(sessionsData.completed);
         setWelcomeCompleted(welcomeData.completed);
+
+        // Разбор раздела про вопрос доступен только по оплаченной подписке.
+        // При ошибке или отсутствии ответа считаем, что подписки нет.
+        const subscriptionData = subscriptionRes.ok ? await subscriptionRes.json() : null;
+        setIsPaid(Boolean(subscriptionData?.isPaid));
       } catch (err) {
         console.error("Failed to load data:", err);
       } finally {
@@ -163,16 +170,19 @@ export default function Home() {
           </button>
         )}
 
-        <button
-          onClick={welcomeCompleted ? () => (window.location.href = "/problem") : undefined}
-          disabled={!welcomeCompleted}
-          className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <span className="block text-base font-semibold">есть вопрос, хочу разобраться в ...</span>
-          <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            В жизненной ситуации или в текущем проекте, хочу пообщаться и найти решение
-          </span>
-        </button>
+        {/* Разбор вопроса — только по оплаченной подписке */}
+        {isPaid && (
+          <button
+            onClick={welcomeCompleted ? () => (window.location.href = "/problem") : undefined}
+            disabled={!welcomeCompleted}
+            className="w-full rounded-md border border-zinc-200 bg-white px-4 py-4 text-left text-sm font-medium text-black transition-colors hover:border-black dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:border-white disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="block text-base font-semibold">есть вопрос, хочу разобраться в ...</span>
+            <span className="block mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              В жизненной ситуации или в текущем проекте, хочу пообщаться и найти решение
+            </span>
+          </button>
+        )}
 
         <button
           onClick={welcomeCompleted ? () => (window.location.href = "/interview-select") : undefined}
