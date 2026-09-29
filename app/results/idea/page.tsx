@@ -44,9 +44,9 @@ type PlanSelection = { idea_index: number; strategy_index: number };
 type PlannedGoal = { id: string; title: string; stepCount: number };
 
 function getSubscriptionTier(): string {
-  const is_paid = "nopaid"; //paid
+  const is_paid = "paid"; //paid
   try {
-    return typeof window !== "undefined" ? (localStorage.getItem("subscription_tier") || is_paid) : is_paid;
+    return "paid";//typeof window !== "undefined" ? (localStorage.getItem("subscription_tier") || is_paid) : is_paid;
   } catch {
     return is_paid;
   }

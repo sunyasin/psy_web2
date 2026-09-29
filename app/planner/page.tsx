@@ -51,7 +51,7 @@ export default function PlannerPage() {
     };
   }, [clientUuid, router]);
 
-  async function handleDeleteClick(goalId: string) {
+  async function handleDeleteClick(goalId: string, _goalTitle?: string) {
     setDeletingGoalId(goalId);
     // Check for started steps by calling deleteGoal which returns warning
     // We'll do a quick check first
@@ -60,7 +60,7 @@ export default function PlannerPage() {
 
   async function handleConfirmDelete() {
     if (!clientUuid || !deletingGoalId) return;
-    
+
     setError(null);
     try {
       const result = await deleteGoal(clientUuid, deletingGoalId);
