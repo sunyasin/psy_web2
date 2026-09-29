@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { startInterview, submitAnswer, loadExistingSession, updateAnswer } from "@/app/interview/actions";
 import { supabase } from "@/lib/supabase";
+import { subscriptionsApi } from "@/lib/subscriptionsApi";
 import type { InterviewQuestionResult, InterviewConfigRow } from "@/lib/types";
 
 export default function WelcomeInterviewPage() {
@@ -84,9 +85,29 @@ export default function WelcomeInterviewPage() {
 
   // Auto-redirect to main page when interview is completed
   useEffect(() => {
-    if (question?.completed) {
+    if (!question?.completed) return;
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid) {
       window.location.href = "/";
+      return;
     }
+    // After completing the welcome interview, ask the user to link Telegram.
+    subscriptionsApi
+      .getSession(clientUuid)
+      .then((result) => {
+        if (result && "error" in result) {
+          window.location.href = "/";
+          return;
+        }
+        if (result?.telegramLinked) {
+          window.location.href = "/";
+        } else {
+          window.location.href = "/link-telegram";
+        }
+      })
+      .catch(() => {
+        window.location.href = "/";
+      });
   }, [question?.completed]);
 
   async function handleSave() {
