@@ -2,7 +2,19 @@
 
 import { getSupabaseServerClient } from "@/lib/supabase";
 import { callClaude, claudeConfigured, LlmMessage } from "@/lib/claude";
-import type { ProblemPhase, ProblemState, ProblemDiagnosisSessionRow } from "@/lib/types";
+import {
+  detectCbtSignals,
+  evaluateCbtSignal,
+  ruleConfidence,
+  CBT_SUGGEST_CONFIDENCE_THRESHOLD,
+  type CbtSignalMatch,
+} from "@/lib/cbt-signal";
+import type {
+  ProblemPhase,
+  ProblemState,
+  ProblemDiagnosisSessionRow,
+  CbtTriggerReason,
+} from "@/lib/types";
 
 const POINT_A_PROMPTS = [
   "Расскажи, что происходит сейчас? В чём именно проблема, своими словами?",
@@ -23,6 +35,33 @@ const CHOICES = [
   { value: "dismiss", label: "Не сейчас" },
 ];
 
+/**
+ * Развилка, которую агент предлагает, заметив КПТ-сигналы.
+ * Переход в КПТ всегда за пользователем — агент только показывает основание.
+ */
+const CBT_GATE_CHOICES = [
+  { value: "cbt_continue", label: "Да, разберём это через КПТ" },
+  { value: "stay_conversation", label: "Продолжим просто обсуждать ситуацию" },
+];
+
+const REASON_LABELS: Record<string, string> = {
+  recurring_pattern_language: "повторяющийся паттерн",
+  self_critical_generalization: "категоричные формулировки о себе",
+  explicit_fear: "конкретный страх или тревога",
+  procrastination_from_fear: "избегание, связанное со страхом",
+  pattern_across_contexts: "один паттерн в разных сферах жизни",
+  why_i_do_this: "запрос понять, почему ты так делаешь",
+};
+
+/** Короткое объяснение, по которому предложен КПТ — "смотри, что я замечаю". */
+function buildCbtGatePrompt(reason: CbtTriggerReason, matches: CbtSignalMatch[]): string {
+  const label = reason ? REASON_LABELS[reason] || "признаки когнитивного паттерна" : "признаки когнитивного паттерна";
+  const evidence = matches[0]?.evidence;
+  const quote = evidence ? ` — «${evidence}»` : "";
+
+  return `Слушай, то, как ты это описываешь${quote}, похоже не на разовую ситуацию, а на паттерн мышления. Я замечаю ${label}. Хочешь, разберём его через КПТ-технику прямо сейчас (бесплатно), или продолжим просто обсуждать саму ситуацию?`;
+}
+
 const PROBLEM_DIAGNOSIS_SYSTEM_PROMPT = `Ты — ассистент по диагностике жизненных проблем. Ты говоришь по-русски. Твоя задача — провести структурированную беседу, чтобы помочь человеку разобраться в своей проблеме.
 
 Флоу сессии:
@@ -34,7 +73,16 @@ const PROBLEM_DIAGNOSIS_SYSTEM_PROMPT = `Ты — ассистент по диа
 
 Говори коротко, по делу, тёпло. Задавай по одному вопросу за раз. Не давай лекций. Не ставь диагнозы. Если клиент молчит или говорит «да»/«нет» — задавай конкретный следующий вопрос.`;
 
-type LogEntry = { role: string; text: string; is_context?: boolean };
+type LogEntry = {
+  role: string;
+  text: string;
+  phase?: ProblemPhase;
+  turn?: number;
+  is_context?: boolean;
+  cbt_declined?: boolean;
+  cbt_suggested?: boolean;
+  cbt_reason?: CbtTriggerReason;
+};
 
 function toLlmMessages(log: LogEntry[]): LlmMessage[] {
   return log
@@ -61,6 +109,54 @@ function splitContext(log: LogEntry[]): {
 
 function withContext(system: string, context: string): string {
   return context ? `${system}\n\n${context}` : system;
+}
+
+/** Накопленный диалог целиком — оценщик КПТ-сигналов смотрит на него, а не на последнюю реплику. */
+function transcriptFrom(log: LogEntry[]): string {
+  return log
+    .filter((e) => !e.is_context && (e.role === "user" || e.role === "agent"))
+    .map((e) => `${e.role === "user" ? "Пользователь" : "Агент"}: ${e.text}`)
+    .join("\n");
+}
+
+/**
+ * Проверяет, не пора ли предложить КПТ. Вызывается после каждого ответа
+ * пользователя; если пользователь уже отказался, повторно не предлагаем.
+ */
+async function checkCbtSignal(
+  log: LogEntry[],
+  lastUserMessage: string
+): Promise<{ suggested: boolean; reason: CbtTriggerReason; matches: CbtSignalMatch[] }> {
+  const matches = detectCbtSignals(lastUserMessage);
+  if (matches.length === 0) return { suggested: false, reason: null, matches };
+
+  const ruleScore = ruleConfidence(matches);
+  if (ruleScore < CBT_SUGGEST_CONFIDENCE_THRESHOLD) {
+    return { suggested: false, reason: null, matches };
+  }
+
+  // Правила — первый фильтр, модель снимает ложные срабатывания на
+  // ситуационных вопросах. Без ключа остаёмся на правилах.
+  const verdict = await evaluateCbtSignal(transcriptFrom(log), matches);
+  if (!verdict) {
+    return { suggested: true, reason: matches[0].reason, matches };
+  }
+
+  if (verdict.continueAs !== "suggest_cbt") {
+    return { suggested: false, reason: null, matches };
+  }
+  if (verdict.confidence < CBT_SUGGEST_CONFIDENCE_THRESHOLD) {
+    return { suggested: false, reason: null, matches };
+  }
+
+  const reason =
+    verdict.triggerReason ||
+    (matches.find((m) => m.reason === verdict.triggerReason)?.reason ?? matches[0].reason);
+
+  console.log(
+    `[problem_diagnosis] suggesting CBT (${reason}, confidence ${verdict.confidence})`
+  );
+  return { suggested: true, reason, matches };
 }
 
 function getFallbackPrompt(phase: ProblemPhase, turn: number): string {
@@ -150,6 +246,42 @@ export async function submitProblemMessage(
   let nextTurn = currentTurn + 1;
   let choices: { value: string; label: string }[] | undefined;
 
+  // Отказ от КПТ-предложения сохраняем в логе сессии, чтобы не предлагать снова.
+  const previouslyDeclinedCbt = log.some((e) => e.cbt_declined);
+
+  if (currentPhase === "cbt_gate") {
+    const answer = message.trim().toLowerCase();
+    const logAfterChoice: LogEntry[] = [
+      ...contextEntry,
+      ...updatedLog,
+      { role: "agent", text: message, phase: "cbt_gate", turn: 0 },
+    ];
+
+    if (answer === "cbt_continue") {
+      await supabase
+        .from("problem_diagnosis_sessions")
+        .update({ routed_to: "free_diagnosis", session_log: logAfterChoice })
+        .eq("id", session.id);
+
+      return buildState(session, "cbt_gate", 0, true, "free_diagnosis");
+    }
+
+    // Пользователь выбрал продолжить беседу — возвращаемся в диалог.
+    const declinedLog: LogEntry[] = [
+      ...logAfterChoice,
+      { role: "agent", text: "", phase: nextPhase, turn: nextTurn, cbt_declined: true },
+    ];
+
+    await supabase
+      .from("problem_diagnosis_sessions")
+      .update({ session_log: declinedLog })
+      .eq("id", session.id);
+
+    return buildState(session, nextPhase, nextTurn, false, undefined, undefined, undefined, {
+      cbtDeclined: true,
+    });
+  }
+
   if (currentPhase === "point_a") {
     if (currentTurn >= POINT_A_PROMPTS.length) {
       nextPhase = "point_b";
@@ -181,6 +313,38 @@ export async function submitProblemMessage(
       .eq("id", session.id);
 
     return buildState(session, "choice", 0, true, routedTo);
+  }
+
+  // Непрерывная проверка: если заметили КПТ-сигналы, предлагаем переход
+  // вместо обычного продолжения беседы. Один раз за сессию.
+  if (!previouslyDeclinedCbt) {
+    const signal = await checkCbtSignal([...conversationLog, { role: "user", text: message }], message);
+
+    if (signal.suggested) {
+      const gatePrompt = buildCbtGatePrompt(signal.reason, signal.matches);
+      const gateLog = [
+        ...contextEntry,
+        ...updatedLog,
+        {
+          role: "agent",
+          text: gatePrompt,
+          phase: "cbt_gate",
+          turn: 0,
+          cbt_suggested: true,
+          cbt_reason: signal.reason,
+        },
+      ];
+
+      await supabase
+        .from("problem_diagnosis_sessions")
+        .update({ session_log: gateLog })
+        .eq("id", session.id);
+
+      return buildState(session, "cbt_gate", 0, false, undefined, gatePrompt, CBT_GATE_CHOICES, {
+        cbtSuggested: true,
+        cbtTriggerReason: signal.reason,
+      });
+    }
   }
 
   let prompt = "";
@@ -222,7 +386,8 @@ function buildState(
   completed = false,
   routedTo?: string,
   prompt?: string,
-  choices?: { value: string; label: string }[]
+  choices?: { value: string; label: string }[],
+  extra?: { cbtSuggested?: boolean; cbtTriggerReason?: CbtTriggerReason; cbtDeclined?: boolean }
 ): ProblemState {
   if (!prompt) {
     if (phase === "point_a") {
@@ -238,9 +403,12 @@ function buildState(
     sessionId: session.id,
     phase,
     prompt: prompt || "",
-    choices: phase === "choice" ? choices : undefined,
+    choices: phase === "choice" || phase === "cbt_gate" ? choices : undefined,
     completed,
     routedTo,
+    cbtSuggested: extra?.cbtSuggested,
+    cbtTriggerReason: extra?.cbtTriggerReason,
+    cbtDeclined: extra?.cbtDeclined,
   };
 }
 
@@ -250,6 +418,7 @@ export async function getProblemPhaseTitle(phase: ProblemPhase): Promise<string>
     point_b: "Точка Б — идеальный результат",
     clarify: "Проверяю, правильно ли понял",
     choice: "Что дальше?",
+    cbt_gate: "Что дальше?",
   };
   return titles[phase];
 }

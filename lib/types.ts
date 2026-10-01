@@ -66,7 +66,17 @@ export interface InterviewQuestionResult {
   completed: boolean;
 }
 
-export type ProblemPhase = "point_a" | "point_b" | "clarify" | "choice";
+export type ProblemPhase = "point_a" | "point_b" | "clarify" | "choice" | "cbt_gate";
+
+/** Почему предложен переход в КПТ — используется как подсказка агенту и в UI. */
+export type CbtTriggerReason =
+  | "recurring_pattern_language"
+  | "self_critical_generalization"
+  | "explicit_fear"
+  | "procrastination_from_fear"
+  | "pattern_across_contexts"
+  | "why_i_do_this"
+  | null;
 
 export interface ProblemDiagnosisSessionRow {
   id: string;
@@ -92,6 +102,11 @@ export interface ProblemState {
   choices?: { value: string; label: string }[];
   completed: boolean;
   routedTo?: string;
+  /** Агент заметил КПТ-сигналы и предложил переключить формат. */
+  cbtSuggested?: boolean;
+  cbtTriggerReason?: CbtTriggerReason;
+  /** Пользователь уже отклонил предложение — больше не предлагаем в этой сессии. */
+  cbtDeclined?: boolean;
 }
 
 export type DomainKey =

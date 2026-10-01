@@ -1,17 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { startProblemDiagnosis, submitProblemMessage } from "./actions";
 import type { ProblemPhase } from "@/lib/types";
-
-type PhaseTitle = Record<ProblemPhase, string>;
-
-const PHASE_TITLES: PhaseTitle = {
-  point_a: "Точка А — что происходит сейчас",
-  point_b: "Точка Б — идеальный результат",
-  clarify: "Проверяю, правильно ли понял",
-  choice: "Что дальше?",
-};
 
 const ROUTED_LABELS: Record<string, string> = {
   free_diagnosis: "🏠 Бесплатная диагностика в чате",
@@ -20,6 +12,9 @@ const ROUTED_LABELS: Record<string, string> = {
 };
 
 export default function ProblemPage() {
+  const searchParams = useSearchParams();
+  const goalId = searchParams.get("goal_id");
+
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,20 +36,19 @@ export default function ProblemPage() {
       return;
     }
 
-    const goalId = new URLSearchParams(window.location.search).get("goal_id") || undefined;
-
     (async () => {
       try {
-        const s = await startProblemDiagnosis(clientUuid, goalId);
+        const s = await startProblemDiagnosis(clientUuid, goalId || undefined);
         setState(s);
-        setMessages((m) => [...m, { role: "agent", text: s.prompt }]);
+        // Статический первый вопрос не показываем: его роль теперь у заголовка страницы.
       } catch (err) {
         setError(err instanceof Error ? err.message : "Ошибка запуска диагностики");
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+    // goal_id стабилен на всё время жизни страницы.
+  }, [goalId]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -141,19 +135,26 @@ export default function ProblemPage() {
   }
 
   const isChoicePhase = state?.phase === "choice";
+  const isCbtGate = state?.phase === "cbt_gate";
   const isCompleted = state?.completed;
+  const showChoices = (isChoicePhase || isCbtGate) && !isCompleted;
 
   return (
     <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex flex-1 w-full max-w-2xl flex-col items-center py-16 px-6 bg-white dark:bg-black">
         <div className="w-full space-y-4">
+          {goalId && (
+            <a
+              href={`/results/idea?goal_id=${encodeURIComponent(goalId)}`}
+              className="inline-block text-xs text-zinc-500 underline dark:text-zinc-400"
+            >
+              На страницу цели
+            </a>
+          )}
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
               Хочешь обсудить саботаж или другой вопрос?
             </h1>
-            <span className="text-xs text-zinc-500 dark:text-zinc-400">
-              {state && !isCompleted ? PHASE_TITLES[state.phase] : "Завершено"}
-            </span>
           </div>
 
           <div className="space-y-4">
@@ -171,7 +172,7 @@ export default function ProblemPage() {
             ))}
           </div>
 
-          {isChoicePhase && !isCompleted && state?.choices && (
+          {showChoices && state?.choices && (
             <div className="grid gap-3">
               {state.choices.map((c) => (
                 <button
@@ -186,7 +187,7 @@ export default function ProblemPage() {
             </div>
           )}
 
-          {!isChoicePhase && !isCompleted && (
+          {!showChoices && !isCompleted && (
             <form onSubmit={handleSubmit} className="space-y-3">
               <textarea
                 value={answer}
@@ -203,18 +204,32 @@ export default function ProblemPage() {
               >
                 {sending ? "Отправляю..." : "Отправить"}
               </button>
+              {goalId && (
+                <a
+                  href={`/results/idea?goal_id=${encodeURIComponent(goalId)}`}
+                  className="block text-center text-xs text-zinc-500 underline dark:text-zinc-400"
+                >
+                  На страницу цели
+                </a>
+              )}
             </form>
           )}
 
           {isCompleted && (
             <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-4 text-center text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-              Результат диагностики сохранён. Далее —{" "}
-              {state?.routedTo === "goal_agent"
-                ? "переход к целеполаганию"
-                : state?.routedTo === "paid_booking"
-                  ? "запись на консультацию"
-                  : "следующий шаг по выбранному варианту"}
-              .
+              {isCbtGate ? (
+                <>Запускаю бесплатную КПТ-сессию...</>
+              ) : (
+                <>
+                  Результат диагностики сохранён. Далее —{" "}
+                  {state?.routedTo === "goal_agent"
+                    ? "переход к целеполаганию"
+                    : state?.routedTo === "paid_booking"
+                      ? "запись на консультацию"
+                      : "следующий шаг по выбранному варианту"}
+                  .
+                </>
+              )}
             </div>
           )}
         </div>
