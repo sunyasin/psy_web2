@@ -46,7 +46,7 @@ type PlannedGoal = { id: string; title: string; stepCount: number };
 function getSubscriptionTier(): string {
   const is_paid = "paid"; //paid
   try {
-    return "paid";//typeof window !== "undefined" ? (localStorage.getItem("subscription_tier") || is_paid) : is_paid;
+    return typeof window !== "undefined" ? (localStorage.getItem("subscription_tier") || is_paid) : is_paid;
   } catch {
     return is_paid;
   }

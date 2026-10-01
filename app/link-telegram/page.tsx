@@ -15,7 +15,7 @@ function readStorage(key: string): string {
 
 export default function LinkTelegramPage() {
   const router = useRouter();
-  const [clientUuid, setClientUuid] = useState<string | null>(null);
+  const [clientUuid] = useState<string>(() => readStorage("client_uuid"));
   const [session, setSession] = useState<SubscriptionSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -24,15 +24,13 @@ export default function LinkTelegramPage() {
   const [linked, setLinked] = useState(false);
 
   useEffect(() => {
-    const uuid = readStorage("client_uuid");
-    if (!uuid) {
+    if (!clientUuid) {
       router.push("/");
       return;
     }
-    setClientUuid(uuid);
     (async () => {
       try {
-        const result = await subscriptionsApi.getSession(uuid);
+        const result = await subscriptionsApi.getSession(clientUuid);
         if (result && "error" in result) {
           setSession(null);
         } else {
@@ -43,7 +41,7 @@ export default function LinkTelegramPage() {
         setLoading(false);
       }
     })();
-  }, [router]);
+  }, [clientUuid, router]);
 
   useEffect(() => {
     if (!dialogOpen || !clientUuid || linked) return;
@@ -61,11 +59,18 @@ export default function LinkTelegramPage() {
     return () => window.clearInterval(timer);
   }, [dialogOpen, clientUuid, linked]);
 
-  useEffect(() => {
-    if (linked) {
-      const t = window.setTimeout(() => router.push("/"), 1500);
-      return () => window.clearTimeout(t);
-    }
+useEffect(() => {
+    if (!linked) return;
+    const clientUuid = readStorage("client_uuid");
+    if (!clientUuid) return;
+    // After linking, send the welcome interview answers + profile to admin
+    fetch("/api/telegram/send-welcome-to-admin", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_uuid: clientUuid }),
+    }).catch(() => {});
+    const t = window.setTimeout(() => router.push("/"), 1500);
+    return () => window.clearTimeout(t);
   }, [linked, router]);
 
   const openBindingDialog = async () => {
