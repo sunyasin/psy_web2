@@ -34,13 +34,33 @@ const PROBLEM_DIAGNOSIS_SYSTEM_PROMPT = `Ты — ассистент по диа
 
 Говори коротко, по делу, тёпло. Задавай по одному вопросу за раз. Не давай лекций. Не ставь диагнозы. Если клиент молчит или говорит «да»/«нет» — задавай конкретный следующий вопрос.`;
 
-function toLlmMessages(log: Array<{ role: string; text: string }>): LlmMessage[] {
+type LogEntry = { role: string; text: string; is_context?: boolean };
+
+function toLlmMessages(log: LogEntry[]): LlmMessage[] {
   return log
     .filter((e) => e.role === "user" || e.role === "agent")
     .map((e) => ({
       role: (e.role === "agent" ? "assistant" : "user") as "assistant" | "user",
       text: e.text,
     }));
+}
+
+/** Контекст саботажа лежит в session_log, но в переписку как реплика не попадает — только в системный промпт. */
+function splitContext(log: LogEntry[]): {
+  context: string;
+  contextEntry: LogEntry[];
+  rest: LogEntry[];
+} {
+  const contextEntries = log.filter((e) => e.is_context);
+  return {
+    context: contextEntries.map((e) => e.text).join("\n\n"),
+    contextEntry: contextEntries,
+    rest: log.filter((e) => !e.is_context),
+  };
+}
+
+function withContext(system: string, context: string): string {
+  return context ? `${system}\n\n${context}` : system;
 }
 
 function getFallbackPrompt(phase: ProblemPhase, turn: number): string {
@@ -60,7 +80,7 @@ function getFallbackPrompt(phase: ProblemPhase, turn: number): string {
 export async function startProblemDiagnosis(clientUuid: string, goalId?: string): Promise<ProblemState> {
   const supabase = getSupabaseServerClient();
 
-  let contextMessage: { role: "agent"; text: string } | null = null;
+  let contextMessage: { role: "agent"; text: string; is_context?: boolean } | null = null;
 
   if (goalId) {
     const { data: goalData } = await supabase
@@ -73,6 +93,7 @@ export async function startProblemDiagnosis(clientUuid: string, goalId?: string)
     if (goalData?.conflict_analysis) {
       contextMessage = {
         role: "agent",
+        is_context: true,
         text: `Контекст: ранее проведён анализ саботажа для этой цели. Вот результат:\n\n${goalData.conflict_analysis}\n\nУчитывайте этот анализ при разговоре с клиентом.`,
       };
     }
@@ -111,13 +132,17 @@ export async function submitProblemMessage(
     throw new Error(error?.message || "No active problem diagnosis session");
   }
 
-  const log = Array.isArray(session.session_log) ? session.session_log : [];
-  const lastEntry = log[log.length - 1] as { phase: ProblemPhase; turn: number } | undefined;
+  const log = Array.isArray(session.session_log) ? (session.session_log as LogEntry[]) : [];
+  const lastEntry = log.filter((e) => !e.is_context).slice(-1)[0] as unknown as
+    | { phase: ProblemPhase; turn: number }
+    | undefined;
   const currentPhase = lastEntry?.phase || "point_a";
   const currentTurn = lastEntry?.turn || 0;
 
+  const { context, contextEntry, rest: conversationLog } = splitContext(log);
+
   const updatedLog = [
-    ...log,
+    ...conversationLog,
     { role: "user", text: message, phase: currentPhase, turn: currentTurn },
   ];
 
@@ -148,6 +173,7 @@ export async function submitProblemMessage(
       .update({
         routed_to: routedTo,
         session_log: [
+          ...contextEntry,
           ...updatedLog,
           { role: "agent", text: message, phase: "choice", turn: 0 },
         ],
@@ -162,7 +188,11 @@ export async function submitProblemMessage(
   if (claudeConfigured()) {
     try {
       const messages = toLlmMessages(updatedLog);
-      prompt = await callClaude(messages, PROBLEM_DIAGNOSIS_SYSTEM_PROMPT, { max_tokens: 512 });
+      prompt = await callClaude(
+        messages,
+        withContext(PROBLEM_DIAGNOSIS_SYSTEM_PROMPT, context),
+        { max_tokens: 512 }
+      );
     } catch (err) {
       console.error("[problem_diagnosis] Claude call failed, using fallback:", err);
       prompt = getFallbackPrompt(nextPhase, nextTurn);
@@ -171,7 +201,11 @@ export async function submitProblemMessage(
     prompt = getFallbackPrompt(nextPhase, nextTurn);
   }
 
-  const agentLog = [...updatedLog, { role: "agent", text: prompt, phase: nextPhase, turn: nextTurn }];
+  const agentLog = [
+    ...contextEntry,
+    ...updatedLog,
+    { role: "agent", text: prompt, phase: nextPhase, turn: nextTurn },
+  ];
 
   await supabase
     .from("problem_diagnosis_sessions")

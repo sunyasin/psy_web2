@@ -149,7 +149,7 @@ export default function ProblemPage() {
         <div className="w-full space-y-4">
           <div className="flex items-center justify-between">
             <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
-              Диагностика проблемы
+              Хочешь обсудить саботаж или другой вопрос?
             </h1>
             <span className="text-xs text-zinc-500 dark:text-zinc-400">
               {state && !isCompleted ? PHASE_TITLES[state.phase] : "Завершено"}
