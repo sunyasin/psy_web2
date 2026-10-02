@@ -18,6 +18,12 @@ export interface CbtSignalRule {
   /** Насколько сильный сигнал сам по себе, 0..1. */
   weight: number;
   description: string;
+  /**
+   * Правило несамостоятельное: считается сигналом только вместе с другим
+   * правилом из requires. Само по себе избегание — это бытовое поведение,
+   * КПТ-сигналом его делает именно связка со страхом.
+   */
+  requires?: Exclude<CbtTriggerReason, null>[];
 }
 
 /**
@@ -79,15 +85,15 @@ export const CBT_SIGNAL_RULES: CbtSignalRule[] = [
     reason: "procrastination_from_fear",
     keywords: [
       "саботирую",
-      "саботаж",
       "прокрастинирую",
       "откладываю",
       "избегаю",
       "не начинаю",
       "не могу начать",
     ],
-    weight: 0.5,
-    description: "Избегание или прокрастинация (в сочетании со страхом — КПТ)",
+    weight: 0.4,
+    requires: ["explicit_fear"],
+    description: "Избегание или прокрастинация в связке со страхом",
   },
   {
     reason: "why_i_do_this",
@@ -166,21 +172,33 @@ export function detectCbtSignals(text: string): CbtSignalMatch[] {
   const lower = text.toLowerCase().trim();
   if (!lower) return [];
 
-  const matches: CbtSignalMatch[] = [];
   const hasResourcePressure = RESOURCE_PRESSURE_KEYWORDS.some((k) => k.test(lower));
 
+  // Первый проход — все сработавшие правила, включая те, что требуют связки.
+  const raw: CbtSignalMatch[] = [];
   for (const rule of CBT_SIGNAL_RULES) {
     const hit = rule.keywords.find((k) => lower.includes(k));
     if (!hit) continue;
     // Поведение, объяснённое нехваткой ресурсов, — не когнитивный паттерн.
     if (hasResourcePressure && RESOURCE_EXPLAINED_REASONS.has(rule.reason)) continue;
-    matches.push({
+    raw.push({
       reason: rule.reason,
       description: rule.description,
       evidence: hit,
       weight: rule.weight,
     });
   }
+
+  if (raw.length === 0) return [];
+
+  const fired = new Set(raw.map((m) => m.reason));
+  // Второй проход — отбрасываем правила без требуемой связки.
+  // «Откладываю» без страха — это бытовое поведение, а не КПТ-сигнал.
+  const matches = raw.filter((m) => {
+    const rule = CBT_SIGNAL_RULES.find((r) => r.reason === m.reason);
+    if (!rule?.requires) return true;
+    return rule.requires.some((need) => fired.has(need));
+  });
 
   if (matches.length === 0) return [];
 
@@ -215,13 +233,14 @@ const SIGNAL_EVALUATOR_PROMPT = `Ты — оценщик сигналов КПТ
 - Генерализация о себе: «я всегда так», «я такой человек», «у меня никогда не получается» — когнитивное искажение, а не ситуация.
 - Повторяющийся паттерн: «опять то же», «в который раз», «каждый раз» — не разовый эпизод.
 - Конкретный страх или тревога, мешающие действовать.
-- Избегание или прокрастинация, связанные со страхом, а не с нехваткой времени.
+- Избегание или прокрастинация, связанные со страхом, а не с нехваткой времени. Избегание само по себе — бытовое поведение, без страха это не сигнал.
 - Один и тот же паттерн проявляется в 2+ разных сферах жизни.
 - Запрос сформулирован как «хочу понять, почему я так делаю», а не «что мне делать».
 
 Сигналы, при которых остаёмся в дружеской беседе:
 - Ситуационная, фактическая проблема: «что делать с X», «как масштабировать проект».
-- Разовoe упоминание без эмоционального заряда.
+- Разовое упоминание без эмоционального заряда.
+- Вопрос О ПРЕДМЕТЕ, а не о себе: «в чем мой саботаж», «что такое саботаж», «объясни, что это значит». Пользователь спрашивает про устройство паттерна — это запрос на информацию, а не проявление паттерна.
 
 Правила:
 - Учитывай ВЕСЬ накопленный диалог, а не только последнюю реплику.
