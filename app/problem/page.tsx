@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { startProblemDiagnosis, submitProblemMessage } from "./actions";
-import type { ProblemPhase } from "@/lib/types";
+import { startProblemDiagnosis, submitProblemMessage, loadProblemHistory } from "./actions";
+import type { ProblemPhase, TranscriptTurn } from "@/lib/types";
 
 const ROUTED_LABELS: Record<string, string> = {
   free_diagnosis: "🏠 Бесплатная диагностика в чате",
@@ -28,6 +28,9 @@ export default function ProblemPage() {
   } | null>(null);
   const [messages, setMessages] = useState<{ role: "agent" | "user"; text: string }[]>([]);
   const [answer, setAnswer] = useState("");
+  const [history, setHistory] = useState<TranscriptTurn[] | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
 
   useEffect(() => {
     const clientUuid = localStorage.getItem("client_uuid");
@@ -40,7 +43,8 @@ export default function ProblemPage() {
       try {
         const s = await startProblemDiagnosis(clientUuid, goalId || undefined);
         setState(s);
-        // Статический первый вопрос не показываем: его роль теперь у заголовка страницы.
+        // Историю не подгружаем: она лежит в БД, а чат показывает текущий диалог.
+        // Полная расшифровка — по кнопке «История», см. handleToggleHistory.
       } catch (err) {
         setError(err instanceof Error ? err.message : "Ошибка запуска диагностики");
       } finally {
@@ -49,6 +53,28 @@ export default function ProblemPage() {
     })();
     // goal_id стабилен на всё время жизни страницы.
   }, [goalId]);
+
+  /** Расшифровка из БД грузится только по клику и кешируется до следующей перезагрузки страницы. */
+  async function handleToggleHistory() {
+    if (history) {
+      setHistory(null);
+      return;
+    }
+    if (historyLoading) return;
+
+    const clientUuid = localStorage.getItem("client_uuid");
+    if (!clientUuid) return;
+
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      setHistory(await loadProblemHistory(clientUuid, goalId || undefined));
+    } catch (err) {
+      setHistoryError(err instanceof Error ? err.message : "Не удалось загрузить историю");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -155,6 +181,43 @@ export default function ProblemPage() {
             <h1 className="text-lg font-semibold text-black dark:text-zinc-50">
               Хочешь обсудить саботаж или другой вопрос?
             </h1>
+          </div>
+
+          <div>
+            <button
+              type="button"
+              onClick={handleToggleHistory}
+              disabled={historyLoading}
+              className="flex items-center gap-1.5 text-xs text-zinc-500 underline disabled:opacity-50 dark:text-zinc-400"
+            >
+              {historyLoading ? "Загружаю историю..." : history ? "Скрыть историю" : "История"}
+            </button>
+
+            {historyError && (
+              <p className="mt-2 text-xs text-red-600 dark:text-red-400">{historyError}</p>
+            )}
+
+            {history && history.length === 0 && (
+              <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                Предыдущих бесед по этой цели пока нет.
+              </p>
+            )}
+
+            {history && history.length > 0 && (
+              <div className="mt-2 max-h-80 space-y-2 overflow-y-auto rounded-lg border border-zinc-200 p-3 dark:border-zinc-800">
+                {history.map((turn, idx) => (
+                  <div key={idx} className="text-xs leading-relaxed">
+                    <div className="text-zinc-400 dark:text-zinc-500">{turn.at}</div>
+                    <div className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+                      <span className="font-semibold">Q:</span> {turn.question}
+                    </div>
+                    <div className="whitespace-pre-wrap text-zinc-700 dark:text-zinc-300">
+                      <span className="font-semibold">A:</span> {turn.answer}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="space-y-4">

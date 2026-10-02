@@ -85,7 +85,12 @@ export interface ProblemDiagnosisSessionRow {
   point_b_description?: string | null;
   problem_summary?: string | null;
   routed_to?: string | null;
-  session_log: any;
+  session_log: string | null;
+  context?: string | null;
+  phase?: ProblemPhase | null;
+  turn?: number | null;
+  goal_id?: string | null;
+  cbt_declined?: boolean | null;
   created_at: string;
 }
 
@@ -93,6 +98,13 @@ export interface ProblemMessage {
   role: "agent" | "user";
   text: string;
   phase: ProblemPhase;
+}
+
+/** Строка расшифровки: "(2026-10-02 09:55:28) Q: ..., A: ...". */
+export interface TranscriptTurn {
+  at: string;
+  question: string;
+  answer: string;
 }
 
 export interface ProblemState {
@@ -107,6 +119,8 @@ export interface ProblemState {
   cbtTriggerReason?: CbtTriggerReason;
   /** Пользователь уже отклонил предложение — больше не предлагаем в этой сессии. */
   cbtDeclined?: boolean;
+  /** История беседы, восстановленная при повторном входе на страницу. */
+  history?: TranscriptTurn[];
 }
 
 export type DomainKey =
