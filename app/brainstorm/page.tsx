@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { Suspense, useState, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 
-export default function BrainstormPage() {
+function BrainstormPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -299,5 +299,21 @@ const contextText = `${ideaTitle}${ideaDescription ? "\n\n" + ideaDescription : 
         </div>
       </main>
     </div>
+  );
+}
+
+export default function BrainstormPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col flex-1 items-center bg-zinc-50 font-sans dark:bg-black">
+          <main className="flex w-full flex-1 flex-col">
+            <p className="p-6 text-sm text-zinc-600 dark:text-zinc-400">Загрузка...</p>
+          </main>
+        </div>
+      }
+    >
+      <BrainstormPageContent />
+    </Suspense>
   );
 }
