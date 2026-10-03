@@ -811,6 +811,7 @@ export default function IdeaPage() {
                                       {item.strategies.map((strategy) => {
                                         const isSelected = selected[item.idea_index] === strategy.strategy_index;
                                         return (
+                                          <>
                                           <button
                                             key={strategy.id}
                                             type="button"
@@ -886,11 +887,9 @@ export default function IdeaPage() {
                                                 </div>
                                               ))}
                                             </div>
-                                          </button>
-);
-                                      })}
-                                          {expandedStrategy?.ideaIndex === item.idea_index && expandedStrategy?.strategyIndex === strategy.strategy_index && (
-                                            <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-900">
+                                           </button>
+                                           {expandedStrategy?.ideaIndex === item.idea_index && expandedStrategy?.strategyIndex === strategy.strategy_index && (
+                                             <div className="mt-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 md:col-span-2 dark:border-zinc-800 dark:bg-zinc-900">
                                               <button
                                                 type="button"
                                                 onClick={() => setExpandedStrategy(null)}
@@ -982,13 +981,16 @@ export default function IdeaPage() {
                                                     </ul>
                                                   </div>
                                                 )}
-                                              </div>
-                                            </div>
-                                          )}
-                                    </div>
-                                  </div>
-                                );
-                              })}
+                                               </div>
+                                             </div>
+                                           )}
+                                           </>
+                                         );
+                                       })}
+                                     </div>
+                                   </div>
+                                 );
+                               })}
                       </div>
 
                       <div className="sticky bottom-4 rounded-xl border border-zinc-200 bg-white/95 p-4 shadow-lg backdrop-blur dark:border-zinc-800 dark:bg-zinc-900/95">
